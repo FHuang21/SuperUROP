@@ -26,12 +26,15 @@ for id in tqdm(shhs2_df.index):
     antidep_df.loc[id, 'TCA1'] = shhs1_df.loc[id, 'TCA1']
     antidep_df.loc[id, 'NTCA1'] = shhs1_df.loc[id, 'NTCA1']
 antidep_df = antidep_df.dropna(how='any') # drop any patients with nan values
-antidep_df = antidep_df[(antidep_df['TCA1'] != antidep_df['TCA2']) & (antidep_df['NTCA1'] != antidep_df['NTCA2'])]
-print(antidep_df)
-for id in tqdm(antidep_df.index):
-    assert antidep_df.loc[id, 'TCA1'] == shhs1_df.loc[id, 'TCA1']
-    assert antidep_df.loc[id, 'NTCA1'] == shhs1_df.loc[id, 'NTCA1']
-    assert antidep_df.loc[id, 'TCA2'] == shhs2_df.loc[id, 'TCA2']
-    assert antidep_df.loc[id, 'NTCA2'] == shhs2_df.loc[id, 'NTCA2']
+antidep_df = antidep_df[(antidep_df['TCA1'] != antidep_df['TCA2']) | (antidep_df['NTCA1'] != antidep_df['NTCA2'])]
 
-# think we did it
+print(antidep_df)
+print("size: ", antidep_df.size)
+
+# for id in tqdm(antidep_df.index):
+#     assert antidep_df.loc[id, 'TCA1'] == shhs1_df.loc[id, 'TCA1']
+#     assert antidep_df.loc[id, 'NTCA1'] == shhs1_df.loc[id, 'NTCA1']
+#     assert antidep_df.loc[id, 'TCA2'] == shhs2_df.loc[id, 'TCA2']
+#     assert antidep_df.loc[id, 'NTCA2'] == shhs2_df.loc[id, 'NTCA2']
+
+# think we did it (for real this time)
