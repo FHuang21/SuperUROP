@@ -10,6 +10,7 @@ from tqdm import tqdm
 from ipdb import set_trace as bp
 import numpy as np
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description='trainingLoop w/specified hyperparams')
 parser.add_argument('-lr', '--lr', type=float, required=True, help='learning rate')
@@ -39,7 +40,7 @@ def perf_measure(y_actual, y_hat):
 
     return(TP, FP, TN, FN)
 
-torch.cuda.empty_cache() # since i usually stop the program in the middle of training before stuff's been cleared
+torch.cuda.empty_cache() # in case early stopping and then restarting
 
 spec_data_path = '/data/scratch/scadavid/projects/data/eeg_mt_spec/'
 
@@ -66,7 +67,7 @@ model = nn.Sequential(conv_layer, pool_layer, resnet_layer).cuda()
 binary_class_weights = torch.tensor([w1, w2]).cuda()
 loss_fn = nn.CrossEntropyLoss(weight=binary_class_weights)
 optimizer = optim.Adam(model.parameters(), lr=lr)
-num_epochs = 1
+num_epochs = 100
 scheduler = lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
 
 # running_loss = 0.0
@@ -158,8 +159,10 @@ for epoch in tqdm(range(num_epochs)):
         new_f1 = sklearn.metrics.f1_score(y_test, y_pred_classes, average='macro')
         if new_f1 > max_f1:
             max_f1 = new_f1
-            model_name = 'lr_'+str(lr).replace('.', '$')+'_w_'+str(w1).replace('.', '$')+'@'+str(w2).replace('.', '$')+'_f1_'+str(round(max_f1, 2))+'.pt'
-            torch.save(model.state_dict(), spec_data_path + model_name)
+            if 'model_name' in globals():
+                os.remove(spec_data_path + 'models/' + model_name) # delete older, worse model
+            model_name = str(lr)+'_'+str(w1)+'_'+str(w2)+'_'+str(round(max_f1, 2))+'.pt'
+            torch.save(model.state_dict(), spec_data_path + 'models/' + model_name)
         # # Compute the average test loss
         # test_loss = test_loss / total_samples
     # Print and store loss
@@ -177,4 +180,3 @@ y_pred = model(X_test)
 y_pred_classes = torch.argmax(y_pred, dim=1)
 
 print(sklearn.metrics.classification_report(y_test, y_pred_classes))
-

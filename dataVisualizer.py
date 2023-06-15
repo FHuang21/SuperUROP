@@ -1,12 +1,8 @@
 import pandas as pd
-import numpy as np
 from tqdm import tqdm
-from ipdb import set_trace as bp
-
-import streamlit as st
-from BrEEG.task_spec import SpecMultitaperFolder, SpecFolder
 import matplotlib.pyplot as plt
-from pathlib import Path
+import streamlit as st
+#import numpy as np
 
 data_path = '/data/netmit/wifall/ADetect/data/'
 
@@ -16,14 +12,13 @@ shhs2data = data_path + 'shhs2/csv/shhs2-dataset-0.14.0.csv'
 shhs1_df = pd.read_csv(shhs1data, encoding='mac_roman', index_col=0)
 shhs2_df = pd.read_csv(shhs2data, encoding='mac_roman', index_col=0)
 
-# shhs1_patients = set(shhs1_df['nsrrid'])
-# shhs2_patients = set(shhs2_df['nsrrid'])
-# print(shhs1_patients.intersection(shhs2_patients) == shhs2_patients) # True
-
 # patients who did both studies will be those in shhs2 labels csv. then add in columns for tca1 and ntca1
-antidep_df = shhs2_df[['TCA2', 'NTCA2']].copy()
+antidep_df = shhs2_df[['TCA2', 'NTCA2', 'timerem', 'remlaip']].copy()
+antidep_df = antidep_df.rename(columns={'timerem':'timerem2', 'remlaip':'remlaip2'}) #
 antidep_df.insert(0, 'TCA1', 0)
 antidep_df.insert(1, 'NTCA1', 0)
+antidep_df.insert(2, 'timerem1', 0) #
+antidep_df.insert(3, 'remlaip1', 0) #
 
 # now need to fill in values for tca1/ntca1 from shhs1 csv
 # if either shhs1/2 psg missing, remove patient from dataframe
@@ -33,131 +28,123 @@ for id in tqdm(shhs2_df.index):
         continue
     antidep_df.loc[id, 'TCA1'] = shhs1_df.loc[id, 'TCA1']
     antidep_df.loc[id, 'NTCA1'] = shhs1_df.loc[id, 'NTCA1']
+    antidep_df.loc[id, 'timerem1'] = shhs1_df.loc[id, 'timerem'] #
+    antidep_df.loc[id, 'remlaip1'] = shhs1_df.loc[id, 'RemLaIP'] / 60.0 # shhs1 csv's rem latencies are in seconds for whatever reason
+    #print(shhs1_df.loc[id, 'RemLaIP'])
 
 antidep_df = antidep_df.dropna(how='any') # drop any patients with nan values
-antidep_df = antidep_df[(antidep_df['TCA1'] != antidep_df['TCA2']) | (antidep_df['NTCA1'] != antidep_df['NTCA2'])]
-
-def get_spec(eeg_file):  # adapt from Haoqi
-    import mne
-    # eeg.shape = (#channel, #point)
-    Fs = eeg_file['fs']  # 200  # [Hz]
-    # preprocessing by filtering
-    eeg = eeg_file['data'].astype(np.float64)
-
-    # s = eeg_file['data'].std()
-    # st.write(f'std {s}')
-    if eeg_file['data'].std() < 1:
-        eeg *= 1e6
-    if eeg_file['data'].std() > 50:
-        eeg /= 5  # FIXME: hack for mgh
-    eeg = eeg - eeg.mean()  # remove baseline
-    # eeg = mne.filter.notch_filter(eeg, Fs, 60)  # remove line noise, US is 60Hz
-    # eeg = mne.filter.filter_data(eeg, Fs, 0.3, 32)  # bandpass, for sleep EEG it's 0.3-35Hz
-
-    # first segment into 30-second epochs
-    epoch_time = 30  # [second]
-    step_time = 30
-    epoch_size = int(round(epoch_time * Fs))
-    step_size = int(round(step_time * Fs))
-
-    # epoch_start_ids = np.arange(0, len(eeg) - epoch_size, epoch_size)
-    # ts = epoch_start_ids / Fs
-    # epochs = eeg.reshape(-1, epoch_size)  # #epoch, size(epoch)
-
-    def get_seg(eeg, l, r):
-        if l >= 0 and r <= len(eeg):
-            return eeg[l:r]
-        else:
-            if r > len(eeg):
-                tmp = eeg[l:]
-                tmp = np.concatenate([tmp, np.zeros((r - l - len(tmp)))])
-                return tmp
-            else:
-                tmp = eeg[:r]
-                tmp = np.concatenate([np.zeros((-l)), tmp])
-                return tmp
-
-    epochs = np.array([
-        get_seg(eeg, i + step_size // 2 - epoch_size // 2, i + step_size // 2 + epoch_size // 2)
-        for i in range(0, len(eeg), step_size)
-    ])
-
-    spec, freq = mne.time_frequency.psd_array_multitaper(epochs, Fs, fmin=0.0, fmax=32, bandwidth=0.5,
-                                                         normalization='full', verbose=False,
-                                                         n_jobs=12)  # spec.shape = (#epoch, #freq)
-    # freq == np.linspace(0,32,961)
-    spec_db = 10 * np.log10(spec)
-    return spec_db.T
-
-# new spec
-def plot_eeg_spec(a, c4m1_path):
-    if c4m1_path.is_file():
-        c4m1_file = np.load(c4m1_path)
-        eeg_spec = get_spec(c4m1_file)
-        tmp = eeg_spec
-        a.pcolormesh(np.arange(tmp.shape[1]) / 30 * 30,
-                     np.linspace(0, 32, tmp.shape[0]),
-                     tmp,
-                     vmin=-10, vmax=15,
-                     antialiased=True,
-                     shading='auto',
-                     cmap='jet')
-    else:
-        tmp = 0
-        c4m1_file = {'data': 0}
-
-    eeg_y_max = 32
-    a.set_title(f'Multitaper EEG {c4m1_path}')
-    a.set_ylabel('Hz')
-    a.set_ylim([0, eeg_y_max])
-    a.set_yticks(list(np.arange(0, eeg_y_max, 4)), list(np.arange(0, eeg_y_max, 4)))
-    a.grid()
-    return tmp
+antidep_changed_df = antidep_df[(antidep_df['TCA1'] != antidep_df['TCA2']) | (antidep_df['NTCA1'] != antidep_df['NTCA2'])] # changed med pattern between
+antidep_started_df = antidep_df[~((antidep_df['TCA1'] == 1.0) | (antidep_df['NTCA1'] == 1.0)) & ((antidep_df['TCA2'] == 1.0) | (antidep_df['NTCA2'] == 1.0))] # started meds between
+antidep_stopped_df = antidep_df[((antidep_df['TCA1'] == 1.0) | (antidep_df['NTCA1'] == 1.0)) & ~((antidep_df['TCA2'] == 1.0) | (antidep_df['NTCA2'] == 1.0))] # stopped meds between
 
 
-def plot_stage(a, stage):
-    a.plot(np.arange(len(stage)), stage)
-    a.set_title('stage')
-    a.set_yticks([0, 1, 2, 3], ['A', 'R', 'L', 'D'])
-    a.grid()
+# combine all these boxplots in one plot
+fig, axs = plt.subplots(2,2, sharex=True, sharey='row')
+# get boxplots
+antidep_started_timerem_boxplot = antidep_started_df.boxplot(column=['timerem1', 'timerem2'], ax=axs[0,0])
+antidep_stopped_timerem_boxplot = antidep_stopped_df.boxplot(column=['timerem1', 'timerem2'], ax=axs[0,1])
+antidep_started_remlaip_boxplot = antidep_started_df.boxplot(column=['remlaip1', 'remlaip2'], ax=axs[1,0])
+antidep_stopped_remlaip_boxplot = antidep_stopped_df.boxplot(column=['remlaip1', 'remlaip2'], ax=axs[1,1])
+# label subplots
+axs[0,0].set_title('Started Antidepressants')
+axs[0,1].set_title('Taken Off Antidepressants')
+common_ticks = [1, 2]  # Example positions on the x-axis
+common_labels = ['shhs1', 'shhs2']
+axs[1,0].set_xticks(common_ticks)
+axs[1,0].set_xticklabels(common_labels)
+axs[0,0].set_ylabel('REM Duration (min)')
+axs[1,0].set_ylabel('REM Latency (min)')
 
+##### now delta plots
 
-def plot_visit(data, nsrrid):
-    
-    fig, ax = plt.subplots(2,1, sharex=True)
+# get delta dataframes
+antidep_started_timerem_delta_df = (antidep_started_df['timerem2'] - antidep_started_df['timerem1']).to_frame()
+antidep_stopped_timerem_delta_df = (antidep_stopped_df['timerem2'] - antidep_stopped_df['timerem1']).to_frame()
+antidep_started_remlaip_delta_df = (antidep_started_df['remlaip2'] - antidep_started_df['remlaip1']).to_frame()
+antidep_stopped_remlaip_delta_df = (antidep_stopped_df['remlaip2'] - antidep_stopped_df['remlaip1']).to_frame()
+antidep_started_timerem_delta_df.columns = ['delta_timerem']
+antidep_stopped_timerem_delta_df.columns = ['delta_timerem']
+antidep_started_remlaip_delta_df.columns = ['delta_remlaip']
+antidep_stopped_remlaip_delta_df.columns = ['delta_remlaip']
+#print(antidep_started_timerem_delta_df)
 
-    uid = data + '-' + str(nsrrid)
-    # plot stage
-    stage_path = Path('/data/netmit/wifall/ADetect/data/') / data / 'stage' / (uid + '.npz')
+fig2, axs2 = plt.subplots(2,2, sharex=True, sharey='row')
+# get boxplots
+antidep_started_timerem_delta_boxplot = antidep_started_timerem_delta_df.boxplot(column='delta_timerem', ax=axs2[0,0])
+antidep_stopped_timerem_delta_boxplot = antidep_stopped_timerem_delta_df.boxplot(column='delta_timerem', ax=axs2[0,1])
+antidep_started_remlaip_delta_boxplot = antidep_started_remlaip_delta_df.boxplot(column='delta_remlaip', ax=axs2[1,0])
+antidep_stopped_remlaip_delta_boxplot = antidep_stopped_remlaip_delta_df.boxplot(column='delta_remlaip', ax=axs2[1,1])
+# label subplots
+axs2[0,0].set_title('Started Antidepressants')
+axs2[0,1].set_title('Taken Off Antidepressants')
+# common_ticks = [1, 2]  # Example positions on the x-axis
+# common_labels = ['shhs1', 'shhs2']
+# axs2[1,0].set_xticks(common_ticks)
+# axs2[1,0].set_xticklabels(common_labels)
+axs2[0,0].set_ylabel('Change REM Duration (min)')
+axs2[1,0].set_ylabel('Change REM Latency (min)')
+axs2[1,0].set_xticklabels('')
+axs2[1,1].set_xticklabels('')
 
-    try:
-        file = np.load(stage_path)
-        stage, fs = file['data'], file['fs']
-        if fs == 1:
-            stage = stage[::30]
-        stage = stage.astype(int)
-        stage_raw = np.copy(stage)
-        idx_invalid = (stage < 0) | (stage > 5)
-        stage_remap = np.array([0, 2, 2, 3, 3, 1] + [np.nan] * 10)
-        stage = stage_remap[stage].astype(float)
-        stage[idx_invalid] = np.nan
-        plot_stage(ax[0], stage)
-        ax[0].set_xticks(np.arange(0, len(stage), 60), np.arange(0, len(stage), 60))
+##### cohort analysis (control / on antidep meds)
+# kinda inefficient, but idc just need the plots rn
 
-        # plot eeg spec
-        c4m1_path = Path('/data/netmit/wifall/ADetect/data/') / data / 'c4_m1' / (uid + '.npz')
-        plot_eeg_spec(ax[1], c4m1_path)
-        fig.tight_layout()
-        st.pyplot(fig)
-    except FileNotFoundError:
-        pass
+# need df with two columns, one for all control patients' REM latencies, and one for all medicated patients' REM latencies
+control_df1 = antidep_df[~((antidep_df['TCA1'] == 1.0) | (antidep_df['NTCA1'] == 1.0))]
+control_df2 = antidep_df[~((antidep_df['TCA2'] == 1.0) | (antidep_df['NTCA2'] == 1.0))]
+med_df1     = antidep_df[(antidep_df['TCA1'] == 1.0) | (antidep_df['NTCA1'] == 1.0)]
+med_df2     = antidep_df[(antidep_df['TCA2'] == 1.0) | (antidep_df['NTCA2'] == 1.0)]
 
-idx = st.slider('idx', value=0,min_value=0,max_value=len(antidep_df)-1)
-nsrrid = antidep_df.index[idx]
+cohort_remlaip_df1 = pd.concat([control_df1['remlaip1'], med_df1['remlaip1']], axis=1)
+cohort_remlaip_df1.columns = ['control1','med1']
+cohort_remlaip_df2 = pd.concat([control_df2['remlaip2'], med_df2['remlaip2']], axis=1)
+cohort_remlaip_df2.columns = ['control2','med2']
 
-patient_meds = antidep_df[antidep_df.index == nsrrid]
-st.write(patient_meds)
-plot_visit('shhs1', nsrrid)
-plot_visit('shhs2', nsrrid)
+cohort_timerem_df1 = pd.concat([control_df1['timerem1'], med_df1['timerem1']], axis=1)
+cohort_timerem_df1.columns = ['control1','med1']
+cohort_timerem_df2 = pd.concat([control_df2['timerem2'], med_df2['timerem2']], axis=1)
+cohort_timerem_df2.columns = ['control2','med2']
 
-# could also include age + other relevant info on plots
+fig3, axs3 = plt.subplots(2, 2, sharey='row')
+cohort_remlaip_boxplot1 = cohort_remlaip_df1.boxplot(column=['control1', 'med1'], ax=axs3[0,0])
+cohort_remlaip_boxplot2 = cohort_remlaip_df2.boxplot(column=['control2', 'med2'], ax=axs3[0,1])
+cohort_timerem_boxplot1 = cohort_timerem_df1.boxplot(column=['control1', 'med1'], ax=axs3[1,0])
+cohort_timerem_boxplot2 = cohort_timerem_df2.boxplot(column=['control2', 'med2'], ax=axs3[1,1])
+axs3[0,0].set_ylabel('REM Latency (min)')
+axs3[1,0].set_ylabel('REM Duration (min)')
+
+#### 2nd cohort analysis (control / tca / ntca) ((doesn't include ppl taking both))
+# control_df1, control_df2 the same
+tca_df1 = antidep_df[(antidep_df['TCA1'] == 1.0) & (antidep_df['NTCA1'] == 0.0)]
+tca_df2 = antidep_df[(antidep_df['TCA2'] == 1.0) & (antidep_df['NTCA2'] == 0.0)]
+ntca_df1 = antidep_df[(antidep_df['TCA1'] == 0.0) & (antidep_df['NTCA1'] == 1.0)]
+ntca_df2 = antidep_df[(antidep_df['TCA2'] == 0.0) & (antidep_df['NTCA2'] == 1.0)]
+
+# REM latency dfs
+cohort2_remlaip_df1 = pd.concat([control_df1['remlaip1'], tca_df1['remlaip1'], ntca_df1['remlaip1']], axis=1)
+cohort2_remlaip_df1.columns = ['control1','tca1','ntca1']
+cohort2_remlaip_df2 = pd.concat([control_df2['remlaip2'], tca_df2['remlaip2'], ntca_df2['remlaip2']], axis=1)
+cohort2_remlaip_df2.columns = ['control2','tca2', 'ntca2']
+
+# REM duration dfs
+cohort2_timerem_df1 = pd.concat([control_df1['timerem1'], tca_df1['timerem1'], ntca_df1['timerem1']], axis=1)
+cohort2_timerem_df1.columns = ['control1','tca1','ntca1']
+cohort2_timerem_df2 = pd.concat([control_df2['timerem2'], tca_df2['timerem2'], ntca_df2['timerem2']], axis=1)
+cohort2_timerem_df2.columns = ['control2','tca2', 'ntca2']
+
+fig4, axs4 = plt.subplots(2, 2, sharey='row')
+cohort2_remlaip_boxplot1 = cohort2_remlaip_df1.boxplot(column=['control1', 'tca1', 'ntca1'], ax=axs4[0,0])
+cohort2_remlaip_boxplot2 = cohort2_remlaip_df2.boxplot(column=['control2', 'tca2', 'ntca2'], ax=axs4[0,1])
+cohort2_timerem_boxplot1 = cohort2_timerem_df1.boxplot(column=['control1', 'tca1', 'ntca1'], ax=axs4[1,0])
+cohort2_timerem_boxplot2 = cohort2_timerem_df2.boxplot(column=['control2', 'tca2', 'ntca2'], ax=axs4[1,1])
+axs4[0,0].set_ylabel('REM Latency (min)')
+axs4[1,0].set_ylabel('REM Duration (min)')
+
+# slider for each figure
+figs = [fig, fig2, fig3, fig4]
+idx = st.slider('idx', value=0,min_value=0,max_value=3)
+st.pyplot(figs[idx])
+
+save_path = '/data/scratch/scadavid/projects/data/'
+filename = 'antidep_changed_patients.csv'
+antidep_changed_df.to_csv(save_path+filename)
