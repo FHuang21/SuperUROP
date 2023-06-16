@@ -14,64 +14,59 @@ from scipy.stats import pearsonr, spearmanr
 import matplotlib.pyplot as plt
 from scipy.ndimage.interpolation import zoom
 from tqdm import tqdm 
-from ipdb import set_trace as bp 
+from ipdb import set_trace as bp
 import datetime 
+
+def id_from_file(filename):
+    return int(filename[6:-4])
 
 class EEG_SHHS_Dataset(Dataset):
 
-    def __init__(self, target_label="PD", transform=None):
+    def __init__(self, transform=None):
         data_path = '/data/netmit/wifall/ADetect/data/'
-        self.mayo_label_path = os.path.join(data_path, "mayo_new/csv")
-        self.root_dir = os.path.join(data_path, 'mayo_new/c4_m1') ## c3_m2, c3_m1_spec,         
+        self.shhs_label_path = os.path.join(data_path, "shhs2/csv")
+        self.root_dir = os.path.join(data_path, 'shhs2/c4_m1') ## c3_m2, c3_m1_spec,
+
+        shhs2_data_path = data_path + 'shhs2/csv/shhs2-dataset-0.14.0.csv'
+        shhs2_df = pd.read_csv(shhs2_data_path, encoding='mac_roman', index_col=0)
+        antidep_df = shhs2_df[['TCA2', 'NTCA2']].copy()
+
+        for id in tqdm(shhs2_df.index):
+            if (not shhs2_df.loc[id, 'shhs2_psg']):
+                antidep_df.drop(index=id)
+                continue
+        antidep_df = antidep_df.dropna(how='any') # drop any patients with nan values
+        self.antidep_df = antidep_df
+
+        def has_psg(filename):
+            id = id_from_file(filename)
+            psg = shhs2_df.loc[id, 'shhs2_psg']
+            return psg
+        def has_med_info(filename):
+            id = id_from_file(filename)
+            med_info = not (pd.isna(shhs2_df.loc[id, 'TCA2']) or pd.isna(shhs2_df.loc[id, 'NTCA2']))
+            return med_info
         
         self.transform = transform
         all_files = os.listdir(self.root_dir)
-        self.all_valid_files = [item for item in all_files if ("nm" in item or "pd" in item)]
+        self.all_valid_files = [item for item in all_files if (not '._' in item and has_psg(item) and has_med_info(item))]
         self.INPUT_SIZE = 12 * 60 * 60 * 64 #hours to 64hz
-        self.target_label = target_label
-        
-        self.total_nm = len([item for item in all_files if "nm" in item])
-        self.total_pd = len([item for item in all_files if "pd" in item])
-
-
-        self.MAYO_BAD = {    # 21
-            '198', '246', '257', '439', '542', '377', '345', '510', '368', '284', '293', '416', '327', '364', '423', '316',
-            '291', '455', '200', '189', '478'
-        }
-        self.MAYO_SHORT = {  # 42
-            '251', '199', '495', '165', '272', '174', '254', '406', '344', '170', '154', '522', '525', '338', '260', '292',
-            '276', '341', '310', '473', '408', '441', '178', '366', '329', '428', '446', '434', '171', '523', '311', '322',
-            '528', '281', '156', '141', '422', '279', '313', '546', '318', '351'
-        }
-
-        # shhs1_label_path = data_path + 'shhs2/csv/shhs1-dataset-0.14.0.csv'
-        # shhs2_label_path = data_path + 'shhs2/csv/shhs2-dataset-0.14.0.csv'
-        
-        # shhs1_df = pd.read_csv(shhs1_label_path, encoding='mac_roman')
-        # shhs2_df = pd.read_csv(shhs2_label_path, encoding='mac_roman')
-
-        # antidep_df = shhs2_df[['nsrrid', 'TCA2', 'NTCA2']].copy()
-        # antidep_df.insert(1, 'TCA1', 0)
-        # antidep_df.insert(2, 'NTCA1', 0)
-
-        # for id in shhs1_df['nsrrid']:
-        #     antidep_df.at[id, 'TCA1'] = shhs1_df[shhs1_df['nsrrid'] == id]['TCA1']
-        #     antidep_df.at[id, 'NTCA1'] = shhs1_df[shhs1_df['nsrrid'] == id]['NTCA1']
 
     def get_label(self, filename):
-        is_pd = "pd" in filename
+        nsrrid = id_from_file(filename)
+        on_med = (self.antidep_df.loc[nsrrid, 'TCA2'] or self.antidep_df.loc[nsrrid, 'NTCA2'])
+        # is_pd = "pd" in filename
         # if is_pd:
             # return torch.tensor([0,1],dtype=torch.float)
         # else:
             # return torch.tensor([1,0],dtype=torch.float)
-        output =  torch.tensor(is_pd)
+        
+        output =  torch.tensor(on_med)
         return output.type(torch.LongTensor)
     def __len__(self):
         return len(self.all_valid_files)
 
     def __getitem__(self, idx):
-        # if torch.is_tensor(idx):
-        #     idx = idx.tolist()
 
         filename = self.all_valid_files[idx]
         data = np.load(os.path.join(self.root_dir, filename)).get('data')

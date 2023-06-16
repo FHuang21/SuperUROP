@@ -66,7 +66,7 @@ class MultiClassDataset(Dataset):
         # idea: loop through every unique image (images can be in multiple folders).
         # if image in control, then label is 0. if image only in tca, then 1. if image in ntca or both tca/ntca, then 2.
         self.image_names = get_unique_image_names(root)
-        with open(spec_data_path + "image_paths.pkl", "rb") as f:
+        with open(spec_data_path + "image_paths.pkl", "rb") as f: #should use 'root' instead of 'spec_data_path' here
             self.image_paths = pickle.load(f)
         with open(spec_data_path + "image_labels.pkl", "rb") as f:
             self.labels = pickle.load(f)

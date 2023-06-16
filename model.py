@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ipdb import set_trace as bp
-from dataset import EEG_SHHS_Dataset
+from __init__ import EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
 from model_others.Flowformer import FlowformerClassiregressor
 
