@@ -1,17 +1,10 @@
-#import pandas as pd
 import numpy as np
 import torch
-# import torch.nn as nn
-# import torch.optim as optim
-#from torchvision import transforms
-#from torchvision.datasets import ImageFolder
 from torch.utils.data import Dataset
 import os
-#from BrEEG.task_spec import SpecMultitaperFolder, SpecFolder
 from PIL import Image
 from tqdm import tqdm
 import pickle
-#from ipdb import set_trace as bp
 
 spec_data_path = '/data/scratch/scadavid/projects/data/eeg_mt_spec/'
 

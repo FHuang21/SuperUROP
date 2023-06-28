@@ -14,15 +14,23 @@ import argparse
 import os
 from metrics import Metrics
 
+# Charlie tensorboard stuff:
+# from torch.utils.tensorboard import SummaryWriter
+# writer = SummaryWriter(log_dir = tensorboard_log)
+# writer.add_scalar("%s/%s"%(phase, key), value, epoch_index)
+
 parser = argparse.ArgumentParser(description='trainingLoop w/specified hyperparams')
-parser.add_argument('-lr', '--lr', type=float, required=True, help='learning rate')
-parser.add_argument('-w1', '--w1', type=float, required=True, help='weight for control class')
-parser.add_argument('-w2', '--w2', type=float, required=True, help='weight for antidep med class')
+parser.add_argument('-lr', '--lr', type=float, default=1e-3, help='learning rate')
+parser.add_argument('-w1', '--w1', type=float, default=1.0, help='weight for control class')
+parser.add_argument('-w2', '--w2', type=float, default=9.0, help='weight for antidep med class')
+parser.add_argument('--task', type=str, default='multiclass', help='multiclass or regression')
+parser.add_argument('--device', type=str, default='cuda', help='cuda')
 args = parser.parse_args()
 lr = args.lr
 w1 = args.w1
 w2 = args.w2
-args.task = 'multiclass'
+task = args.task
+device = args.device
 # can also add batch_size, more in the future
 
 def perf_measure(y_actual, y_hat):
@@ -67,7 +75,7 @@ test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False) # don't 
 
 X_test, y_test = default_collate(testset)
 
-# initialize model that is modification of resnet50 architecture
+# initialize Ali's model
 eeg_encoder = EEG_Encoder().cuda()
 pd_encoder = BranchVarEncoder().cuda()
 pd_predictor = BranchVarPredictor().cuda()
@@ -106,7 +114,7 @@ for epoch in tqdm(range(num_epochs)):
         #torch.cuda.empty_cache()
     
     epoch_loss = running_loss
-    computed_metrics = Metrics.compute_and_log_metrics(epoch_loss)
+    computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
     logger(writer, computed_metrics, 'train', epoch)
 
     metrics.clear_metrics()
@@ -128,13 +136,13 @@ for epoch in tqdm(range(num_epochs)):
             # y_pred_classes.append(y_pred_classes_batch)
             y_pred_classes = torch.argmax(y_pred, dim=1)
             metrics.fill_metrics(y_pred_classes, y_test_batch)
-            loss = loss_fn(y_pred_classes, y_test_batch)
+            loss = loss_fn(y_pred_classes, y_test_batch.float()) # y_test_batch is 'Long' type (why tho?)
             running_loss += loss.item()
 
         epoch_loss = running_loss
         # y_pred_classes = torch.cat(y_pred_classes)
         # y_pred_classes = y_pred_classes.detach().cpu().numpy()
-        computed_metrics = Metrics.compute_and_log_metrics(epoch_loss)
+        computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
         logger(writer, computed_metrics, 'val', epoch)
         metrics.clear_metrics()
 
@@ -148,6 +156,8 @@ for epoch in tqdm(range(num_epochs)):
             torch.save(model.state_dict(), spec_data_path + 'models/' + model_name)
 
     torch.cuda.empty_cache()
+
+writer.close()
 
 # model = model.cpu()
 # model.eval()
