@@ -5,8 +5,8 @@ from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor
 from torch.utils.data import DataLoader, random_split, default_collate
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
-import torchmetrics
-import sklearn.metrics
+# import torchmetrics
+# import sklearn.metrics
 from __init__ import EEG_SHHS_Dataset
 from tqdm import tqdm
 from ipdb import set_trace as bp
