@@ -2,21 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ipdb import set_trace as bp
-from __init__ import EEG_SHHS_Dataset
+from dataset import EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
 from model_others.Flowformer import FlowformerClassiregressor
 
-
-INPUT_SIZE = 16 * 60 * 60 * 64 #hours to 64hz
-
-
-# class DumpRNN(nn.Module):
-#     def __init__(self, net):
-#         super(DumpRNN, self).__init__()
-#         self.net = net
-
-#     def forward(self, x):
-#         return self.net(x), None
 
 
 class DumpRNN(nn.Module):
@@ -136,6 +125,42 @@ class EEG_Encoder(nn.Module):
         x = x.transpose(1, 2)
 
         return x, atts
+    
+class StagePredictorModel(nn.Module):
+    def __init__(self, arch_scale=0.5, arch_capacity=512, input_dim = None):
+        Scale = arch_scale
+        Capacity = arch_capacity
+        num_classes = 5
+        # if getattr(args, 'dual_level', False):
+        #     num_classes = 6  # [A,R,L,D] + [N1,N2]
+
+        super(StagePredictorModel, self).__init__()
+        self.BN0 = nn.BatchNorm1d(int(Scale * Capacity), track_running_stats=False)
+        self.BN1 = nn.BatchNorm1d(int(Scale * Capacity * 2), track_running_stats=False)
+        self.BN2 = nn.BatchNorm1d(int(Scale * Capacity * 2), track_running_stats=False)
+
+        self.dropout1 = nn.Dropout(0.4)
+        self.dropout2 = nn.Dropout(0.4)
+
+        if input_dim == None:
+            input_dim = int(Scale * Capacity)
+
+        self.fc1 = nn.Conv1d(input_dim, int(Scale * Capacity * 2), kernel_size=1, stride=1, padding=0)
+        self.fc2 = nn.Conv1d(int(Scale * Capacity * 2), int(Scale * Capacity * 2), kernel_size=1, stride=1, padding=0)
+        self.fc3 = nn.Conv1d(int(Scale * Capacity * 2), num_classes, kernel_size=1, stride=1, padding=0)
+
+        self.Scale = Scale
+        self.Capacity = Capacity
+        self.num_classes = num_classes
+
+    def forward(self, x):
+        x, _ = x
+        x = self.fc1(x)
+        x = self.dropout1(F.relu(self.BN1(x)))
+        x = self.fc2(x)
+        x = self.dropout2(F.relu(self.BN2(x)))
+        x = self.fc3(x)
+        return x
 
 class BottleNeck1d(nn.Module):
     def __init__(self, in_channels, out_channels, stride, kernel_size, Scale):
@@ -218,13 +243,12 @@ class StackSequential(nn.Module):
         return x, atts
 
 
-
 class BranchVarEncoder(nn.Module):
 
-    def __init__(self):
+    def __init__(self, args):
         super(BranchVarEncoder, self).__init__()
 
-        num_channel = 256 #1024 #if args.model_type != 'nas2' else 2016
+        num_channel = args.num_channel #256 #1024 #if args.model_type != 'nas2' else 2016
         self.num_var = 1 #args.num_var
         self.num_fold = 2 #args.num_fold
         self.vis_attention = False #args.vis_attention
@@ -239,7 +263,11 @@ class BranchVarEncoder(nn.Module):
         #     self.attention_fc2 = nn.Conv1d(512, self.num_fold, 1, 1, 0, 1, 1, False)
 
     def forward(self, x):
-        x, _ = x
+        if len(x) == 2:
+            x, _ = x
+        elif len(x) == 4:
+            x, _, _, _ = x
+        
         attn_mask = None ## custom because we don't need the attention here
         attn_mask = torch.ones([x.size(0), x.size(-1)]).to(torch.device('cuda' if torch.cuda.is_available() else 'cpu')) if attn_mask is None else attn_mask[:, ::12]
         x_att = self.attention_fc1(x)
@@ -259,10 +287,10 @@ class BranchVarEncoder(nn.Module):
 
 class BranchVarPredictor(nn.Module):
 
-    def __init__(self):
+    def __init__(self, args):
         super(BranchVarPredictor, self).__init__()
 
-        num_channel = 256 #1024 #if args.model_type != 'nas2' else 2016
+        num_channel = args.num_channel #256 #1024 #if args.model_type != 'nas2' else 2016
         self.num_var = 2 #args.num_var
         self.multi_head_attn = False #args.multi_head_attn
         self.vis_attention = False #args.vis_attention
@@ -295,6 +323,46 @@ class BranchVarPredictor(nn.Module):
         else:
             return pred, encoding_pd_last
 
+def fc_block(in_channels: int, out_channels: int, is_bn=True) -> nn.Module:
+    return nn.Sequential(
+        nn.Linear(in_channels, out_channels),
+        nn.BatchNorm1d(out_channels),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+    ) if is_bn else nn.Sequential(
+        nn.Linear(in_channels, out_channels),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+    )
+    
+class BranchHYPredictor(nn.Module):
+
+    # EncodingWidth, Capacity = 256, 512
+
+    def __init__(self, args):
+        super(BranchHYPredictor, self).__init__()
+        self.EncodingWidth = args.num_channel 
+        self.Capacity = 512 
+        
+        self.vis_attention = False #args.vis_attention
+        # self.hy_type = args.hy_type
+        self.output_dim = 2 #args.hy_outdim if args.hy_type == 'cls' else args.hy_outdim - 1
+        self.fc1 = fc_block(self.EncodingWidth, self.Capacity, is_bn=False)
+        self.fc2 = fc_block(self.Capacity, self.Capacity, is_bn=False)
+        self.fc3 = fc_block(self.Capacity, self.Capacity, is_bn=False)
+        self.fc_final = nn.Linear(self.Capacity, self.output_dim)
+        self.relu = nn.ReLU()
+
+    def forward(self, data):
+        encoding = data.view(data.size(0), -1)
+        pred = self.fc1(encoding)
+        pred = self.fc2(pred)
+        encoding_hy_last = self.fc3(pred)
+        pred = self.relu(self.fc_final(encoding_hy_last)) #i added the relu #F.sigmoid(self.fc_final(encoding_hy_last)) if self.hy_type.startswith('ordinal') else \
+        if not self.vis_attention:
+            return pred
+        else:
+            return pred, encoding_hy_last
 
 
 class Conv_BN(nn.Module):
@@ -315,92 +383,121 @@ class Conv_BN(nn.Module):
 
 
 
-# class BottleNeck1d_3(nn.Module):
+class BottleNeck1d_IRLAS_3(nn.Module):
 
-#     def __init__(self, in_channels, hidden_channels, out_channels, stride, kernel_size, group_num=1):
-#         super(BottleNeck1d_3, self).__init__()
-#         self.stride = stride
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
+    def __init__(self, in_channels, out_channels, stride, kernel_size, group_num=1):
+        super(BottleNeck1d_IRLAS_3, self).__init__()
+        self.stride = stride
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.comb_channels = out_channels // 3
 
-#         if stride != 1 or in_channels != out_channels:
-#             self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0)
+        self.conv_left = nn.Conv1d(in_channels, self.comb_channels, kernel_size=1, stride=stride, padding=0)
+        self.bn_left = nn.BatchNorm1d(self.comb_channels)
 
-#         self.conv1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=1, stride=1, padding=0)
-#         self.bn1 = nn.BatchNorm1d(hidden_channels)
+        self.conv_mid_3x3 = nn.Conv1d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+        self.conv_mid_1x1 = nn.Conv1d(in_channels, self.comb_channels, kernel_size=1, stride=stride, padding=0)
+        self.bn_mid_1 = nn.BatchNorm1d(in_channels)
+        self.bn_mid_2 = nn.BatchNorm1d(self.comb_channels)
 
-#         self.conv2 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size=kernel_size, stride=stride,
-#                                padding=(kernel_size - 1) // 2, groups=group_num)
-#         self.bn2 = nn.BatchNorm1d(hidden_channels)
+        self.conv_right = nn.Conv1d(in_channels, self.comb_channels, kernel_size=5, stride=stride, padding=2)
+        self.bn_right = nn.BatchNorm1d(self.comb_channels)
 
-#         self.conv3 = nn.Conv1d(hidden_channels, out_channels, kernel_size=1, stride=1, padding=0)
-#         self.bn3 = nn.BatchNorm1d(out_channels)
+    def forward(self, x):
+        x_left = F.relu(self.bn_left(self.conv_left(x)))
 
-#     def forward(self, x):
-#         if self.stride != 1 or self.in_channels != self.out_channels:
-#             y = self.shortcut(x)
-#         else:
-#             y = x
-#         x = F.relu(self.bn1(self.conv1(x)))
-#         x = F.relu(self.bn2(self.conv2(x)))
-#         x = self.bn3(self.conv3(x))
+        x_mid = self.bn_mid_1(self.conv_mid_3x3(x))
+        x_mid = F.relu(x_mid + x)
+        x_mid = F.relu(self.bn_mid_2(self.conv_mid_1x1(x_mid)))
 
-#         x = F.relu(x + y)
-#         return x
-    
-    
-# class EEG_Enc(nn.Module):
-#     """ EEG encoder
-#     Input shape: B x 1 x (#second * 64) (EEG time)
-#     Output shape: B x #channel_enc x (#second / 12) (EEG Spec)
-#     Output shape: B x #channel_enc x (#second / 3) (EEG time)
-#     """
+        x_right = F.relu(self.bn_right(self.conv_right(x)))
 
-#     def __init__(self, rnn_layer=1, rnn_drop_between=0.0):
-#         super(EEG_Enc, self).__init__()
-#         self.block1_0 = BottleNeck1d_3(1, 128, 128, 1, 5)
+        x = torch.cat([x_left, x_mid, x_right], 1)
+        return x
 
-#         self.block2_0 = BottleNeck1d_3(128, 64, 128, 1, 5)
-#         self.block2_1 = BottleNeck1d_3(128, 64, 128, 1, 5)
 
-#         self.block2_3 = BottleNeck1d_3(128, 64, 256, 3, 5)
+class BBEncoder(nn.Module):
+    """ BB Encoder
+    Input shape: B x 3 x (#second * 10)
+    Output shape: B x #channel_enc x (#second / 12)
+    """
+
+    def __init__(self):
+        super(BBEncoder, self).__init__()
+
+        # self.model_type = args.model_type
+        # condense model when memory usage is limited
+        # self.updrs_consistency = args.updrs_consistency
+        self.conv0 = nn.Conv1d(3, 64, kernel_size=11, stride=5, padding=5, bias=False)
+        self.bn0 = nn.BatchNorm1d(64, eps=0.001, momentum=0.1, affine=True)
+        capacity = 84
+        self.block1_0 = BottleNeck1d_IRLAS_3(64, capacity*3, 1, 5)
+        self.block1_1 = BottleNeck1d_IRLAS_3(capacity*3, capacity*3, 1, 5)
+        self.block1_2 = BottleNeck1d_IRLAS_3(capacity*3, capacity*3, 1, 5)
+        self.block1_3 = BottleNeck1d_IRLAS_3(capacity*3, capacity*6, 2, 5)
+
+        self.block2_0 = BottleNeck1d_IRLAS_3(capacity*6, capacity*6, 1, 5)
+        self.block2_1 = BottleNeck1d_IRLAS_3(capacity*6, capacity*6, 1, 5)
+        self.block2_2 = BottleNeck1d_IRLAS_3(capacity*6, capacity*6, 1, 5)
+        self.block2_3 = BottleNeck1d_IRLAS_3(capacity*6, capacity*24, 3, 5)
+        # self.sru3 = SRU(capacity*24, capacity*12, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,
+        #                 rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
+        rnn_layer = 1
+        rnn_drop_between = 0.0
         
-#         self.sru3 = nn.LSTM(256, 128, num_layers=rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
-#         # self.sru3 = SRU(256, 128, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
-#         self.block_sru3 = BottleNeck1d_3(256, 128, 256, 2, 3)
+        self.sru3 = nn.LSTM(capacity*24, capacity*12, num_layers=rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
+        self.block_sru3 = BottleNeck1d_IRLAS_3(capacity*24, capacity*24, 2, 3)
+        # self.sru6 = SRU(capacity*24, capacity*12, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,
+        #                 rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
+        self.sru6 = nn.LSTM(capacity*24, capacity*12, num_layers=rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
+        self.block_sru6 = BottleNeck1d_IRLAS_3(capacity*24, capacity*24, 2, 3)
+        self.sru12 = nn.LSTM(capacity*24, capacity*12, num_layers=rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
+        # self.sru12 = SRU(capacity*24, capacity*12, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,
+        #                     rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
+        # lstm = nn.LSTM(
+        #     int(Scale * Capacity),
+        #     int(Scale * Capacity // 2),
+        #     num_layers=rnn_layers,
+        #     batch_first=True,
+        #     bidirectional=True,
+        # )
         
-#         self.sru6 = nn.LSTM(256, 128, num_layers=rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
-#         # self.sru6 = SRU(256, 128, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
-#         self.block_sru6 = BottleNeck1d_3(256, 128, 512, 2, 3)
-        
-#         self.sru12 = nn.LSTM(512, 256, num_layers= rnn_layer, batch_first=True, bidirectional=True, dropout=rnn_drop_between)
-#         # self.sru12 = SRU(512, 256, num_layers=args.rnn_layer, dropout=args.rnn_drop_between,rnn_dropout=args.rnn_drop_in, use_tanh=1, bidirectional=True)
-    
-#     def forward(self, x):
-#         x = self.block1_0.forward(x)
+    def forward(self, x):
+        # only bb as input
 
-#         x = self.block2_0.forward(x)
-#         x = self.block2_1.forward(x)
-#         x = self.block2_3.forward(x)  # 256
+        x = self.conv0(x.repeat(1,3,1))
 
-#         x = x.transpose(0, 1)
-#         x, _ = self.sru3(x.transpose(0, 2))
-#         x = x.transpose(0, 2)
-#         x = x.transpose(0, 1).contiguous()  # 512
-#         x = self.block_sru3.forward(x)
+        x = self.block1_0.forward(x)
+        x = self.block1_1.forward(x)
+        x = self.block1_2.forward(x)
+        x = self.block1_3.forward(x)
 
-#         x = x.transpose(0, 1)
-#         x, _ = self.sru6(x.transpose(0, 2))
-#         x = x.transpose(0, 2)
-#         x = x.transpose(0, 1).contiguous()  # 1024
-#         x = self.block_sru6(x)
+        x = self.block2_0.forward(x)
+        x = self.block2_1.forward(x) # if self.updrs_consistency != 'triplet' else x
+        skip1 = self.block2_2.forward(x)  # 256
+        x = self.block2_3.forward(skip1)
 
-#         x = x.transpose(0, 1)
-#         x, _ = self.sru12(x.transpose(0, 2))  # 1024
-#         x = x.transpose(0, 2)
-#         x = x.transpose(0, 1).contiguous()
-#         return x
-    
+        x = x.transpose(0, 1)
+        x, _ = self.sru3(x.transpose(0, 2))
+        x = x.transpose(0, 2)
+        skip2 = x.transpose(0, 1).contiguous()  # 512
+        x = self.block_sru3.forward(skip2)
+
+        x = x.transpose(0, 1)
+        x, _ = self.sru6(x.transpose(0, 2))
+        x = x.transpose(0, 2)
+        skip3 = x.transpose(0, 1).contiguous()  # 1024
+        x = self.block_sru6(skip3)
+
+        x = x.transpose(0, 1)
+        x, _ = self.sru12(x.transpose(0, 2))  # 1024
+        x = x.transpose(0, 2)
+        x = x.transpose(0, 1).contiguous()
+
+        return x, skip1, skip2, skip3
+
+
+
 if __name__ == '__main__':
     dataset = EEG_SHHS_Dataset()
     
@@ -429,5 +526,3 @@ if __name__ == '__main__':
     # output = pd_predictor(pd_encode_output)
     
     bp()
-
-

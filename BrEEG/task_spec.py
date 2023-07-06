@@ -34,38 +34,21 @@ class NsrrInfo:
     # df_wsc = pd.read_csv(scratch_root / 'ADetect/data/wsc_new/csv/wsc-dataset-0.5.0.csv',
     #                      encoding='cp1252', low_memory=False)
 
-    try: # added by S
-        df_shhs2_vardict = pd.read_csv(
-            scratch_root / 'ADetect/data/shhs2_new/csv/shhs-data-dictionary-0.14.0-variables.csv',
-            encoding='cp1252', low_memory=False)
-        df_mayoad = pd.read_excel(scratch_root / 'ADetect/data/mayo_new/csv/AD-PD De-identified updated SLG 06-25-20.xlsx',
-                                sheet_name='AD')
+    df_shhs2_vardict = pd.read_csv(
+        scratch_root / 'ADetect/data/shhs2_new/csv/shhs-data-dictionary-0.14.0-variables.csv',
+        encoding='cp1252', low_memory=False)
+    df_mayoad = pd.read_excel(scratch_root / 'ADetect/data/mayo_new/csv/AD-PD De-identified updated SLG 06-25-20.xlsx',
+                            sheet_name='AD')
 
-        """From Processed"""
-        # df_mros1 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros1-dataset-augmented.csv', low_memory=False)
-        # df_mros2 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros2-dataset-augmented.csv', low_memory=False)
-        df_shhs1 = pd.read_csv(scratch_root / 'ADetect/data/csv/shhs1-dataset-augmented.csv', low_memory=False)
-        df_shhs2 = pd.read_csv(scratch_root / 'ADetect/data/csv/shhs2-dataset-augmented.csv', low_memory=False)
-        df_mayoad = pd.read_csv(scratch_root / 'ADetect/data/csv/mayoad-dataset-augmented.csv', low_memory=False)
-        df_mgh = pd.read_csv(scratch_root / 'ADetect/data/csv/mgh-dataset-augmented.csv', low_memory=False)
-        df_wsc = pd.read_csv(scratch_root / 'ADetect/data/csv/wsc-dataset-augmented.csv', low_memory=False)
-    except FileNotFoundError:
-        # df_shhs2_vardict = pd.read_csv(
-        #     scratch_root / 'ADetect/data/shhs2_new/csv/shhs-data-dictionary-0.14.0-variables.csv',
-        #     encoding='cp1252', low_memory=False)
-        # df_mayoad = pd.read_excel(scratch_root / 'ADetect/data/mayo_new/csv/AD-PD De-identified updated SLG 06-25-20.xlsx',
-        #                         sheet_name='AD')
+    """From Processed"""
+    # df_mros1 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros1-dataset-augmented.csv', low_memory=False)
+    # df_mros2 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros2-dataset-augmented.csv', low_memory=False)
+    df_shhs1 = pd.read_csv(scratch_root / 'ADetect/data/csv/shhs1-dataset-augmented.csv', low_memory=False)
+    df_shhs2 = pd.read_csv(scratch_root / 'ADetect/data/csv/shhs2-dataset-augmented.csv', low_memory=False)
+    df_mayoad = pd.read_csv(scratch_root / 'ADetect/data/csv/mayoad-dataset-augmented.csv', low_memory=False)
+    df_mgh = pd.read_csv(scratch_root / 'ADetect/data/csv/mgh-dataset-augmented.csv', low_memory=False)
+    df_wsc = pd.read_csv(scratch_root / 'ADetect/data/csv/wsc-dataset-augmented.csv', low_memory=False)
 
-        """From Processed"""
-        # df_mros1 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros1-dataset-augmented.csv', low_memory=False)
-        # df_mros2 = pd.read_csv(scratch_root / 'ADetect/data/csv/mros2-dataset-augmented.csv', low_memory=False)
-        
-
-        df_shhs1 = pd.read_csv(mnt2_root / 'csv/shhs1-dataset-augmented.csv', low_memory=False)
-        df_shhs2 = pd.read_csv(mnt2_root / 'csv/shhs2-dataset-augmented.csv', low_memory=False)
-        df_mayoad = pd.read_csv(mnt2_root / 'csv/mayoad-dataset-augmented.csv', low_memory=False)
-        df_mgh = pd.read_csv(mnt2_root / 'csv/mgh-dataset-augmented.csv', low_memory=False)
-        df_wsc = pd.read_csv(mnt2_root / 'csv/wsc-dataset-augmented.csv', low_memory=False)
 
     """
     [MrOS] Alzheimers related variables
@@ -508,11 +491,11 @@ class SpecFolder:
         self.remove_tail = remove_tail
 
     def load(self, uid):
-        #spec_file = np.load(scratch_root / f'ADetect/data/{self.data}/spec/{self.spec}/{uid}.npz')
-        #my add ins:
-        spec_data_path = '/data/scratch/scadavid/projects/data/eeg_mt_spec/'
-        spec_file = np.load(spec_data_path)
-        #
+        spec_file = np.load(scratch_root / f'ADetect/data/{self.data}/spec/{self.spec}/{uid}.npz')
+        # #my add ins:
+        # spec_data_path = '/data/scratch/scadavid/projects/data/eeg_mt_spec/'
+        # spec_file = np.load(spec_data_path)
+        # #
         x = spec_file['signal']
         stage_file = np.load(scratch_root / f'ADetect/data/{self.data}/stage/{uid}.npz')
         stage = stage_file['data']
@@ -528,9 +511,9 @@ class SpecFolder:
 
         # [cut signal after sleep] #
         x = x[:, :sleep_end * 2]
-        assert not np.isnan(x).any()
-        # nan_idx = np.isnan(x)
-        # x[nan_idx] = 0
+        #assert not np.isnan(x).any() # why are there nans? ask Hao
+        nan_idx = np.isnan(x)
+        x[nan_idx] = 0
 
         if x.shape[-1] < 2048:
             x = np.concatenate([x, np.zeros((x.shape[0], 2048 - x.shape[-1]), dtype=np.float32)], 1)
@@ -557,7 +540,7 @@ class SpecDataset(Dataset):
         super(SpecDataset, self).__init__()
         self.data = data
         self.phase = phase
-        self.transform = transform
+        #self.transform = transform
         self.args = args
 
         if df is None:
@@ -639,7 +622,7 @@ class SpecDataset(Dataset):
             y = np.clip(np.log(y + 1e-10), -np.log(100), np.log(100)) / np.log(5)
             assert not np.isnan(y) and not np.isinf(y)
         else:
-            y = self.df.label.iloc[i]
+            y = self.df[label].iloc[i]
         return np.array([y], dtype=np.float32)
 
     def __getitem__(self, i):
@@ -651,7 +634,7 @@ class SpecDataset(Dataset):
         # elif lenx > 1024:
         #     x = x[:, :, :1024]
         x = torch.from_numpy(x)
-        x = self.transform(x)
+        #x = self.transform(x)
         y = self.load_label(i)
         return x, y
 
@@ -738,6 +721,7 @@ class DeepClassifier(pl.LightningModule):
                 setattr(self, f'metric_{k}_{k2}', v2)
 
     def forward(self, x):
+        print(x.shape)
         embedding = self.encoder(x)
         y_pred = self.fc_var(embedding)
         return y_pred, embedding
@@ -1078,6 +1062,17 @@ def get_df(data, args):
             is_pos = (df['mhpark'] == '1') | (df['mhparkt'] == '1')
         else:
             assert False
+    
+    elif args.task == 'antidep':
+        if data == 'shhs1': #FIXME: 
+            is_pos = (df['TCA1'] == 1) | (df['NTCA1'] == 1)
+        elif data == 'shhs2':
+            is_pos = (df['TCA2'] == 1) | (df['NTCA2'] == 1)
+        elif data == 'mgh':
+            is_pos = df['dx_elix_depre']
+        else:
+            assert False
+
     else:
         assert False
 
