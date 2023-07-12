@@ -1,11 +1,14 @@
 import torchmetrics
+import torchmetrics.classification
 import torch 
 
 class Metrics():
     def __init__(self, args):
         self.args = args 
         
-        if self.args.task == 'multiclass':
+        if self.args.label == 'antidep':
+             self.num_classes = 4
+        elif self.args.task == 'multiclass':
             self.num_classes = 2
         elif self.args.target == 'hy':
             self.num_classes = 8
@@ -46,8 +49,10 @@ class Metrics():
 
                 "recall": torchmetrics.Recall(task = "multiclass",num_classes=self.num_classes, average = None).cuda(),#.to(self.args.device),
 
-                "f1": torchmetrics.F1Score(task = 'multiclass',num_classes=self.num_classes).cuda()#.to(self.args.device)
-            }
+                "f1_macro": torchmetrics.F1Score(task = "multiclass", num_classes=self.num_classes, average = "macro").cuda(),
+
+                "f1_c": torchmetrics.classification.MulticlassF1Score(num_classes=self.num_classes, average = None).cuda()#.to(self.args.device)
+            } # ^ classwise f1
             if self.args.task == 'regression':
                 classifier_metrics_dict["mae"] = torchmetrics.MeanAbsoluteError().cuda()#.to(self.args.device)
                 classifier_metrics_dict["expvar"] = torchmetrics.ExplainedVariance().cuda()#.to(self.args.device)
@@ -66,12 +71,15 @@ class Metrics():
         self.classifier_metrics_dict["kappa"].update(predictions, labels)
         self.classifier_metrics_dict["prec"].update(predictions, labels)
         self.classifier_metrics_dict["recall"].update(predictions, labels)
-        self.classifier_metrics_dict["f1"].update(predictions, labels)
+        self.classifier_metrics_dict["f1_macro"].update(predictions, labels)
+        self.classifier_metrics_dict["f1_c"].update(predictions, labels)
                         
-    def compute_and_log_metrics(self, loss, hy_loss=0, classwise_prec_recall=True):
+    def compute_and_log_metrics(self, loss, hy_loss=0, classwise_prec_recall=True, classwise_f1=True):
         # if self.args.task == 'multiclass':
             prec = self.classifier_metrics_dict["prec"].compute()
             rec = self.classifier_metrics_dict["recall"].compute()
+            f1 = self.classifier_metrics_dict["f1_macro"].compute()
+            f1_c = self.classifier_metrics_dict["f1_c"].compute()
             
             # "hy_loss": hy_loss,
             # "mae": self.classifier_metrics_dict["mae"].compute(),
@@ -86,9 +94,12 @@ class Metrics():
                 # "pos_precision": pos_prec,
                 # "neg_recall": neg_rec,
                 # "pos_recall": pos_rec,
+                "f1_macro": self.classifier_metrics_dict["f1_macro"].compute()
                 
-                "f1": self.classifier_metrics_dict["f1"].compute(),
                 }
+            if classwise_f1:
+                 for i in range(self.num_classes):
+                      metrics[str(i) + "_f1"] = f1_c[i]
             if classwise_prec_recall:
                 for i in range(self.num_classes):
                     metrics[str(i) + "_precision"] = prec[i]

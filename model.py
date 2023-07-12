@@ -6,20 +6,6 @@ from dataset import EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
 from model_others.Flowformer import FlowformerClassiregressor
 
-
-
-class DumpRNN(nn.Module):
-    def __init__(self, net):
-        super(DumpRNN, self).__init__()
-        self.net = net
-
-    def forward(self, x):
-        return self.net(x), None
-
-    # returns the attention and output from flowformer
-    def forward_with_visualization(self, x):
-        return self.net.forward_with_visualization(x)
-
 def get_rnn(Scale,
             Capacity,
             rnn,
@@ -57,6 +43,29 @@ def get_rnn(Scale,
 
     return lstm
 
+def fc_block(in_channels: int, out_channels: int, is_bn=True) -> nn.Module:
+    return nn.Sequential(
+        nn.Linear(in_channels, out_channels),
+        nn.BatchNorm1d(out_channels),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+    ) if is_bn else nn.Sequential(
+        nn.Linear(in_channels, out_channels),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+    )
+
+class DumpRNN(nn.Module):
+    def __init__(self, net):
+        super(DumpRNN, self).__init__()
+        self.net = net
+
+    def forward(self, x):
+        return self.net(x), None
+
+    # returns the attention and output from flowformer
+    def forward_with_visualization(self, x):
+        return self.net.forward_with_visualization(x)
 
 class EEG_Encoder(nn.Module):
     def __init__(self, arch_scale=0.5, arch_capacity=512, arch_rnn='S.flow.lstm.flow.lstm', arch_rnn_layers=1):
@@ -213,7 +222,6 @@ class BottleNeck1d(nn.Module):
         x = x + y
         return x
 
-
 class StackParallel(nn.Module):
     def __init__(self, models):
         super(StackParallel, self).__init__()
@@ -222,7 +230,6 @@ class StackParallel(nn.Module):
     def forward(self, x):
         outputs = [model(x)[0] for model in self.models]
         return torch.stack(outputs).sum(0), None
-
 
 class StackSequential(nn.Module):
     def __init__(self, models):
@@ -241,7 +248,6 @@ class StackSequential(nn.Module):
                 x = model(x)[0]
 
         return x, atts
-
 
 class BranchVarEncoder(nn.Module):
 
@@ -284,7 +290,6 @@ class BranchVarEncoder(nn.Module):
         else:
             return encoding, x_att, x_att_logit
 
-
 class BranchVarPredictor(nn.Module):
 
     def __init__(self, args):
@@ -322,19 +327,7 @@ class BranchVarPredictor(nn.Module):
             return pred
         else:
             return pred, encoding_pd_last
-
-def fc_block(in_channels: int, out_channels: int, is_bn=True) -> nn.Module:
-    return nn.Sequential(
-        nn.Linear(in_channels, out_channels),
-        nn.BatchNorm1d(out_channels),
-        nn.ReLU(),
-        nn.Dropout(0.5),
-    ) if is_bn else nn.Sequential(
-        nn.Linear(in_channels, out_channels),
-        nn.ReLU(),
-        nn.Dropout(0.5),
-    )
-    
+ 
 class BranchHYPredictor(nn.Module):
 
     # EncodingWidth, Capacity = 256, 512
@@ -364,7 +357,6 @@ class BranchHYPredictor(nn.Module):
         else:
             return pred, encoding_hy_last
 
-
 class Conv_BN(nn.Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, is_BN=True, groups=1, bias=True):
@@ -380,8 +372,6 @@ class Conv_BN(nn.Module):
             x = self.BN(x)
         x = F.relu(x)
         return x
-
-
 
 class BottleNeck1d_IRLAS_3(nn.Module):
 
@@ -414,7 +404,6 @@ class BottleNeck1d_IRLAS_3(nn.Module):
 
         x = torch.cat([x_left, x_mid, x_right], 1)
         return x
-
 
 class BBEncoder(nn.Module):
     """ BB Encoder
@@ -496,7 +485,26 @@ class BBEncoder(nn.Module):
 
         return x, skip1, skip2, skip3
 
+class SimplePredictor(nn.Module):
+    def __init__(self, layer_dims=[256,64,16], encoding_width=768, output_dim=2):
+        super(SimplePredictor, self).__init__() # so this subclass can inhert nn.Module functionality
+        self.fc1 = fc_block(encoding_width, layer_dims[0], is_bn=False)
+        self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=False)
+        self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=False)
+        #self.fc4 = fc_block(layer_dims[2], layer_dims[3], is_bn=False)
+        self.fc_final = nn.Linear(layer_dims[2], output_dim)
 
+
+    def forward(self, x):
+        #print(x.shape)
+        x = self.fc1(x)
+        #print(x.shape)
+        x = self.fc2(x)
+        #print(x.shape)
+        x = self.fc3(x)
+        #x = self.fc4(x)
+        pred = self.fc_final(x)
+        return pred
 
 if __name__ == '__main__':
     dataset = EEG_SHHS_Dataset()

@@ -492,11 +492,17 @@ class SpecFolder:
 
     def load(self, uid):
         spec_file = np.load(scratch_root / f'ADetect/data/{self.data}/spec/{self.spec}/{uid}.npz')
-        # #my add ins:
-        # spec_data_path = '/data/scratch/scadavid/projects/data/eeg_mt_spec/'
-        # spec_file = np.load(spec_data_path)
-        # #
+
         x = spec_file['signal']
+        # following  lines added in by S
+        inf_idx = np.isinf(x)
+        x[inf_idx] = 0
+        assert not np.isinf(x).any()
+        nan_idx = np.isnan(x)
+        x[nan_idx] = 0
+        assert not np.isnan(x).any()
+
+        # S end
         stage_file = np.load(scratch_root / f'ADetect/data/{self.data}/stage/{uid}.npz')
         stage = stage_file['data']
         if stage_file['fs'] == 1:
@@ -511,9 +517,11 @@ class SpecFolder:
 
         # [cut signal after sleep] #
         x = x[:, :sleep_end * 2]
-        #assert not np.isnan(x).any() # why are there nans? ask Hao
-        nan_idx = np.isnan(x)
-        x[nan_idx] = 0
+
+        assert not np.isinf(x).any()
+        assert not np.isnan(x).any() # why are there nans? ask Hao
+        #nan_idx = np.isnan(x)
+        #x[nan_idx] = 0
 
         if x.shape[-1] < 2048:
             x = np.concatenate([x, np.zeros((x.shape[0], 2048 - x.shape[-1]), dtype=np.float32)], 1)
@@ -540,7 +548,7 @@ class SpecDataset(Dataset):
         super(SpecDataset, self).__init__()
         self.data = data
         self.phase = phase
-        #self.transform = transform
+        self.transform = transform
         self.args = args
 
         if df is None:
@@ -593,7 +601,7 @@ class SpecDataset(Dataset):
             assert False
 
         self.x_list = []
-        for i in tqdm(range(len(self))):
+        for i in tqdm(range(len(self))): # this takes over a minute... should pickle x_list at some point
             uid = self.df.uid.iloc[i]
             spec = [fd.load(uid) for fd in spec_folders]
             while len(spec) < 3:  # make 3 channels
@@ -622,8 +630,10 @@ class SpecDataset(Dataset):
             y = np.clip(np.log(y + 1e-10), -np.log(100), np.log(100)) / np.log(5)
             assert not np.isnan(y) and not np.isinf(y)
         else:
-            y = self.df[label].iloc[i]
-        return np.array([y], dtype=np.float32)
+            #print(self.df['label'])
+            y = self.df['label'].iloc[i]
+            #print("label y is: ", y)
+        return torch.tensor(y)
 
     def __getitem__(self, i):
         x = self.x_list[i]
@@ -634,7 +644,11 @@ class SpecDataset(Dataset):
         # elif lenx > 1024:
         #     x = x[:, :, :1024]
         x = torch.from_numpy(x)
-        #x = self.transform(x)
+        #x = x.clone().detach()
+        #x = x.repeat(3,1,1)
+        #print("x.shape before transform: ", x.shape)
+        x = self.transform(x)
+        #print("x.shape after transform: ", x.shape)
         y = self.load_label(i)
         return x, y
 
@@ -704,7 +718,7 @@ class DeepClassifier(pl.LightningModule):
         super().__init__()
         self.encoder = self.ArchDict[args.arch]()
         self.encoder.fc = nn.Identity()
-        self.fc_var = nn.Linear(512, 1)
+        self.fc_var = nn.Linear(2048, 2) # changed from (512,1) to (2048,2)
         self.args = args
 
         # setup metrics
@@ -721,9 +735,20 @@ class DeepClassifier(pl.LightningModule):
                 setattr(self, f'metric_{k}_{k2}', v2)
 
     def forward(self, x):
-        print(x.shape)
-        embedding = self.encoder(x)
+        # print("x.shape: ", x.shape)
+        # x = x.repeat(1,3,1,1)
+        # print("x.shape: ", x.shape)
+        #print("x shape: ", x.shape)
+
+        # x shape is [1,3,256,1024]
+        embedding = self.encoder(x) 
+        #print("embedding shape")
+        #print(embedding.shape)
+        # embedding = embedding.t()
+        # self.fc_var = self.fc_var.t()
         y_pred = self.fc_var(embedding)
+        #y_pred = y_pred.clone().detach()
+        #y_pred = torch.tensor(y_pred, dtype=torch.float32)
         return y_pred, embedding
 
     def configure_optimizers(self):
@@ -1044,7 +1069,7 @@ def get_df(data, args):
 
     df = getattr(info, f'df_{data}')
 
-    if args.task == 'ad':
+    if args.label == 'ad':
         if data == 'shhs2':
             is_pos = df.alzh2 == 1
         elif data == 'mros2':
@@ -1054,7 +1079,7 @@ def get_df(data, args):
         else:
             assert False
 
-    elif args.task == 'pd':
+    elif args.label == 'pd':
 
         if data == 'shhs2':
             is_pos = df['prknsn2'] == 1
@@ -1063,11 +1088,11 @@ def get_df(data, args):
         else:
             assert False
     
-    elif args.task == 'antidep':
+    elif args.label == 'antidep':
         if data == 'shhs1': #FIXME: 
-            is_pos = (df['TCA1'] == 1) | (df['NTCA1'] == 1)
+            is_pos = (df['tca1'] == 1) | (df['ntca1'] == 1)
         elif data == 'shhs2':
-            is_pos = (df['TCA2'] == 1) | (df['NTCA2'] == 1)
+            is_pos = (df['tca2'] == 1) | (df['ntca2'] == 1)
         elif data == 'mgh':
             is_pos = df['dx_elix_depre']
         else:
@@ -1079,10 +1104,11 @@ def get_df(data, args):
     df_pos = df[is_pos]
     df_neg = df[~is_pos]
 
-    num_pos = len(df_pos)
-    num_neg = int(num_pos * args.ratio)
-    df_neg = df_neg[:num_neg]
-    print(f'#Pos {len(df_pos)} #Neg {len(df_neg)}')
+    # note: following code is to balance an imbalanced dataset (here for pd). hao says it's not very successful anyway
+    # num_pos = len(df_pos)
+    # num_neg = int(num_pos * args.ratio)
+    # df_neg = df_neg[:num_neg]
+    # print(f'#Pos {len(df_pos)} #Neg {len(df_neg)}')
 
     df_pos = df_pos.assign(label=1)
     df_neg = df_neg.assign(label=0)
