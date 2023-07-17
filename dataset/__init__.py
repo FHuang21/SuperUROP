@@ -4,7 +4,7 @@ import torch
 import pandas as pd
 # from skimage import io, transform
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 
@@ -23,8 +23,9 @@ class DatasetCombiner(Dataset):
         self.datasets = []
         self.datasets_len = []
         for dataset in datasets:
-            generator1 = torch.Generator().manual_seed(42)
-            trainset, valset = random_split(dataset, [int(0.8 * len(dataset)), len(dataset) - int(0.8 * len(dataset))], generator=generator1)
+            generator1 = torch.Generator().manual_seed(20)
+            #trainset, valset = random_split(dataset, [int(0.7 * len(dataset)), len(dataset) - int(0.7 * len(dataset))], generator=generator1)
+            trainset, valset = random_split(dataset, [0.7, 0.3], generator=generator1)
             
             if phase == 'train':
                 self.datasets.append(trainset)
@@ -684,14 +685,17 @@ class EEG_MAYO_Dataset(Dataset):
             return torch.tensor(self.dict_hy[filename])
 
 class EEG_Encoding_SHHS2_Dataset(Dataset):
-    def __init__(self, label='antidep', file="/data/netmit/wifall/ADetect/data/shhs2_new/csv/shhs2-dataset-0.14.0.csv", encoding_path="/data/scratch-oc40/lth/mage-br-eeg-inference/20230601-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-30kdata-neweeg-ema-br1d-1layerbbenc/iter1-temp0.0-minmr0.5/shhs2_new"):
+    def __init__(self, args, label='antidep', file="/data/netmit/wifall/ADetect/data/shhs2_new/csv/shhs2-dataset-0.14.0.csv", 
+                 encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/shhs2_new/abdominal_c4_m1"):
+        self.with_attention = args.attention
         self.file = file # label file
         self.label = label
         self.encoding_path = encoding_path
         self.all_shhs2_encodings = os.listdir(self.encoding_path)
 
-        self.data_dict = self.parse_shhs2_antidep() if (label=='antidep'or label=='nsrrid') else self.parse_shhs2_sf36() # get dictionary of encodings with associated labels
-        self.all_valid_files = list(self.data_dict.keys())
+        self.data_dict = self.parse_shhs2_antidep()
+        self.data_dict_hs = self.parse_shhs2_sf36()
+        self.all_valid_files = list(self.data_dict_hs.keys() if (self.label=="dep" or self.label=="dep-binary") else self.data_dict.keys())
 
     def parse_shhs2_antidep(self):
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -705,10 +709,10 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         df = df[['nsrrid', 'ql209h']]
         df = df.dropna()
         # and here also drop guys who are on the fence of generally being happy/sad
-        df = df[(df['ql209h'] != 3) & (df['ql209h'] != 4)]
+        #df = df[(df['ql209h'] != 3) & (df['ql209h'] != 4)] #FIXME::: change back
         #print(df)
         #bp()
-        df['ql209h'] = df['ql209h'].apply(lambda x: 1 if x > 4 else 0)
+        df['ql209h'] = df['ql209h'].apply(lambda x: 1 if x >= 4 else 0) #FIXME::::
         # good
         label_but_no_enc =  []
         output = {f"shhs2-{k}.npz": v for k, v in zip(df['nsrrid'], df['ql209h']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
@@ -717,8 +721,11 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         return output
     
     def get_label(self, filename):
-        if(self.label == "antidep"):
+        if(self.label == "antidep-binary"):
+            #bp()
             return torch.tensor((self.data_dict[filename][0] or self.data_dict[filename][1]), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
+        elif(self.label == "antidep"):
+            pass #FIXME::
         elif(self.label == "nsrrid"):
             return filename
         else:
@@ -733,9 +740,32 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
             return 1
         else:
             return 0
+    
+    def threshold_values(self):
+        #th = 4
+        med_names = ['tca', 'ntca', 'control']
+        data = {'>=th':[0,0,0], '<th':[0,0,0]}
+        df = pd.DataFrame(data, index=med_names)
+
+        for pid in self.data_dict_hs.keys():
+            if pid in self.data_dict.keys():
+                is_tca = self.data_dict[pid][0]
+                is_ntca = self.data_dict[pid][1]
+                is_control = 1 if not (is_tca or is_ntca) else 0
+                if self.data_dict_hs[pid] == 1:
+                    df.loc['tca','>=th'] += is_tca
+                    df.loc['ntca','>=th'] += is_ntca
+                    df.loc['control','>=th'] += is_control
+                else:
+                    df.loc['tca','<th'] += is_tca
+                    df.loc['ntca','<th'] += is_ntca
+                    df.loc['control','<th'] += is_control
+        
+        
+        return df
         
     def __len__(self):
-        return len(self.data_dict)
+        return len(self.data_dict_hs if self.label=="dep" else self.data_dict)
     
     def __getitem__(self, idx):
         filename = self.all_valid_files[idx]
@@ -743,7 +773,14 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         x = np.load(filepath)
         x = dict(x)
         #print(x['br_latent'].shape) # (565, 768) for ex.
-        feature = x['br_latent'].mean(0) # it gives you 768 dim feature for each night
+        if self.with_attention:
+            feature = x['decoder_eeg_latent'].squeeze(0)
+            if feature.shape[0] >= 120:
+                feature = feature[:120, :]
+            else:
+                feature = np.concatenate((feature, np.zeros((120-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+        else:
+            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
         # print("feature shape: ", feature.shape)
         # print(type(feature))
         label = self.get_label(filename)
@@ -754,23 +791,21 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
 
         feature = torch.from_numpy(feature)
 
-        # should return feature and label, both tensors
-        #print("label: ", label)
         return feature, label
 
-
-class EEG_Encoding_WSC_Dataset(Dataset):
-    def __init__(self, label='antidep', file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
+class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
+    def __init__(self, args, label='antidep', file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/wsc_new/abdominal_c4_m1"):
-
+        self.with_attention = args.attention
         self.file = file # label file
         self.label = label
+        self.control = args.control
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
         self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
         self.data_dict_hs = self.parse_wsc_zung()
-        self.all_valid_files = list(self.data_dict.keys() if self.label=="antidep" else self.data_dict_hs.keys())
+        self.all_valid_files = list(self.data_dict_hs.keys() if (self.label=="dep" or self.label=="dep-binary") else self.data_dict.keys())
 
     def parse_wsc_antidep(self): # label: depression_med
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -785,17 +820,22 @@ class EEG_Encoding_WSC_Dataset(Dataset):
     
     def parse_wsc_zung(self): # label: zung_score (> 40 => depressed)
         df = pd.read_csv(self.file, encoding='mac_roman')
-        df = df[['wsc_id', 'wsc_vst', 'zung_score']]
+        df = df[['wsc_id', 'wsc_vst', 'zung_score', 'depression_med']] # can change to if control thing
         df = df.dropna()
         #df['zung_score'] = df['zung_score'].apply(lambda x: 1 if x >= 40 else 0)
-        output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['zung_score']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        if self.control:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, antidep in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not antidep)}
+        else:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['zung_score']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
         return output
     
     def get_label(self, filename):
         if(self.label == "nsrrid"):
             return filename
-        elif(self.label == "dep"):
-            return torch.tensor(1 if self.data_dict_hs[filename]>=40 else 0, dtype=torch.int64) 
+        elif(self.label == "dep"): # regression w/raw zung score
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
+        elif(self.label == "dep-binary"):
+            return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64) 
         elif(self.label == "antidep"): # can add thing based on args.num_classes
             #return torch.tensor(self.data_dict[filename][0], dtype=torch.int64) #binary classification
             if(self.data_dict[filename][2]): #ssri
@@ -806,6 +846,35 @@ class EEG_Encoding_WSC_Dataset(Dataset):
                 return torch.tensor(3)
             else:
                 return torch.tensor(0) #control
+        elif(self.label == "antidep-binary"):
+            return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
+
+    def threshold_values(self):
+        th = 36
+        med_names = ['tca', 'ssri', 'other', 'control']
+        data = {'>=th':[0,0,0,0], '<th':[0,0,0,0]}
+        df = pd.DataFrame(data, index=med_names)
+        #bp()
+        # so inefficient, yikes
+        for pid in self.data_dict_hs.keys():
+            if pid in self.data_dict.keys():
+                is_tca = self.data_dict[pid][1]
+                is_ssri = self.data_dict[pid][2]
+                is_other = self.data_dict[pid][0] if not is_tca and not is_ssri else 0
+                is_control = 1 if not (is_tca or is_ssri or is_other) else 0
+                if self.data_dict_hs[pid] >= th:
+                    df.loc['tca','>=th'] += is_tca
+                    df.loc['ssri','>=th'] += is_ssri
+                    df.loc['other','>=th'] += is_other
+                    df.loc['control','>=th'] += is_control
+                else:
+                    df.loc['tca','<th'] += is_tca
+                    df.loc['ssri','<th'] += is_ssri
+                    df.loc['other','<th'] += is_other
+                    df.loc['control','<th'] += is_control
+        
+        return df
+
     
     def get_label_from_filename(self, filename): # antidep label
         on_antidep = self.data_dict[filename][0]
@@ -827,16 +896,23 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         return 1 if self.data_dict_hs[filename]>=40 else 0
     
     def __len__(self):
-        return len(self.data_dict)
+        return len(self.data_dict_hs if (self.label=='dep' or self.label=='dep-binary') else self.data_dict)
     
     def __getitem__(self, idx):
-        filename = self.all_valid_files[idx]
+        filename = self.all_valid_files[idx] # so dict length is longer than all_valid_files length? yeah cause of the diff label
         filepath = os.path.join(self.encoding_path, filename)
         x = np.load(filepath)
         x = dict(x)
         #bp()
         #print(x['br_latent'].shape) # (565, 768) for ex.
-        feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
+        if self.with_attention:
+            feature = x['decoder_eeg_latent'].squeeze(0)
+            if feature.shape[0] >= 120:
+                feature = feature[:120, :]
+            else:
+                feature = np.concatenate((feature, np.zeros((120-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+        else:
+            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
         # print("feature shape: ", feature.shape)
         # print(type(feature))
         label = self.get_label(filename)
@@ -847,20 +923,29 @@ class EEG_Encoding_WSC_Dataset(Dataset):
 
         # should return feature and label, both tensors
         return feature, label
-        
-if __name__ == '__main__':
-    class Object(object):
-        pass
-    args = Object
-    args.data_source = 'eeg'
-    dataset = EEG_SHHS2_Dataset(args)
     
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
-    aa = iter(dataloader)
-    for i in range(10):
-        t = datetime.datetime.now()
-        data, label = next(aa)
-        bp()
-        print(data.shape, label)
-        print(datetime.datetime.now() - t)
-    bp()  
+
+
+# class BR_Encoding_UDALL_Dataset(Dataset):
+#     def __init__(self, patient_id, label='antidep'):
+#         self.label = label
+#         self.id = patient_id
+    
+#     def pa
+        
+# if __name__ == '__main__':
+#     class Object(object):
+#         pass
+#     args = Object
+#     args.data_source = 'eeg'
+#     dataset = EEG_SHHS2_Dataset(args)
+    
+#     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+#     aa = iter(dataloader)
+#     for i in range(10):
+#         t = datetime.datetime.now()
+#         data, label = next(aa)
+#         bp()
+#         print(data.shape, label)
+#         print(datetime.datetime.now() - t)
+#     bp()  

@@ -488,6 +488,7 @@ class BBEncoder(nn.Module):
 class SimplePredictor(nn.Module):
     def __init__(self, layer_dims=[256,64,16], encoding_width=768, output_dim=2):
         super(SimplePredictor, self).__init__() # so this subclass can inhert nn.Module functionality
+        self.output_dim = output_dim
         self.fc1 = fc_block(encoding_width, layer_dims[0], is_bn=False)
         self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=False)
         self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=False)
@@ -504,7 +505,61 @@ class SimplePredictor(nn.Module):
         x = self.fc3(x)
         #x = self.fc4(x)
         pred = self.fc_final(x)
+        if(self.output_dim==1):
+            pred = pred.squeeze(1)
         return pred
+
+class SimpleAttentionPredictor(nn.Module):
+    def __init__(self, layer_dims=[256,64,16], encoding_width=768, output_dim=2):
+        super(SimpleAttentionPredictor, self).__init__()
+        self.output_dim = output_dim
+        self.attention = AttentionCondensation(input_size=encoding_width, hidden_size=layer_dims[0])
+        self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=False)
+        self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=False)
+        self.fc_final = nn.Linear(layer_dims[2], output_dim)
+
+    def forward(self, x):
+        #bp()
+        x = self.attention(x)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        pred = self.fc_final(x)
+        if(self.output_dim==1):
+            pred = pred.squeeze(1)
+        return pred
+
+class AttentionCondensation(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(AttentionCondensation, self).__init__()
+        self.value_layer = nn.Linear(input_size, hidden_size)
+        self.query_layer = nn.Linear(input_size, 1)
+        self.softmax = nn.Softmax(dim=1)
+        
+    def forward(self, x):
+        query = self.softmax(self.query_layer(x))
+        values = self.value_layer(x)
+        #bp()
+        attended_output = torch.matmul(query.permute(0, 2, 1), values)
+        return attended_output.permute(0,2,1).squeeze(2)
+
+# class SimpleRegressor(nn.Module):
+#     def __init__(self, layer_dims=[256,64,16], encoding_width=768):
+#         super(SimpleRegressor, self).__init__() 
+#         self.fc1 = fc_block(encoding_width, layer_dims[0], is_bn=False)
+#         self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=False)
+#         self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=False)
+#         self.fc_final = nn.Linear(layer_dims[2], 1)
+
+
+#     def forward(self, x):
+#         #print(x.shape)
+#         x = self.fc1(x)
+#         #print(x.shape)
+#         x = self.fc2(x)
+#         #print(x.shape)
+#         x = self.fc3(x)
+#         pred = self.fc_final(x)
+#         return pred
 
 if __name__ == '__main__':
     dataset = EEG_SHHS_Dataset()
