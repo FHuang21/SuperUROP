@@ -182,7 +182,7 @@ print("num pos in train: ", num_pos_train)
 print("length testset: ", len(testset))
 print("num pos in val: ", num_pos_val)
 
-
+## **** about to implement k-fold cross validation ***
 #bp()
 
 class_weights = torch.tensor(weights, dtype=torch.float32).to(available_devices[0])
