@@ -761,14 +761,15 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64)
         
     def get_label_from_filename(self, filename):
-        on_tca = self.data_dict[filename][0]
-        on_ntca = self.data_dict[filename][1]
-        if(on_ntca):
-            return 2
-        elif(on_tca):
-            return 1
-        else:
-            return 0
+        # on_tca = self.data_dict[filename][0]
+        # on_ntca = self.data_dict[filename][1]
+        # if(on_ntca):
+        #     return 2
+        # elif(on_tca):
+        #     return 1
+        # else:
+        #     return 0
+        return self.data_dict_hs[filename]
     
     def threshold_values(self): # hella inefficient
         #th = 4
@@ -867,10 +868,10 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
             self.all_valid_files = list(self.data_dict_hs.keys())
         elif(self.label == "antidep"):
             self.all_valid_files = list(self.data_dict.keys())
-        elif(self.label == "benzo"):
-            self.all_valid_files = list(self.data_dict_b.keys())
+        # elif(self.label == "benzo"):
+        #     self.all_valid_files = list(self.data_dict_benzos.keys())
         elif(self.label == "nsrrid"):
-            self.all_valid_files = list(self.all_wsc_encodings) ## FIXME:::::
+            self.all_valid_files = list(self.data_dict_hs.keys())
 
     def parse_wsc_antidep(self): # label: depression_med
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -948,17 +949,18 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
 
     
     def get_label_from_filename(self, filename): # antidep label
-        on_antidep = self.data_dict[filename][0]
-        on_tca = self.data_dict[filename][1]
-        on_ssri = self.data_dict[filename][2]
-        if(on_tca):
-            return 1
-        elif(on_ssri):
-            return 2
-        elif(on_antidep):
-            return 3
-        else:
-            return 0
+        # on_antidep = self.data_dict[filename][0]
+        # on_tca = self.data_dict[filename][1]
+        # on_ssri = self.data_dict[filename][2]
+        # if(on_tca):
+        #     return 1
+        # elif(on_ssri):
+        #     return 2
+        # elif(on_antidep):
+        #     return 3
+        # else:
+        #     return 0
+        return (1 if self.data_dict_hs[filename]>=36 else 0)
     
     def get_happysad_from_filename(self, filename):
         return self.data_dict_hs[filename]
@@ -967,7 +969,7 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         return 1 if self.data_dict_hs[filename]>=40 else 0
     
     def __len__(self):
-        return len(self.data_dict_hs if (self.label=='dep' or self.label=='dep-binary') else self.data_dict)
+        return len(self.data_dict_hs if (self.label=='dep' or self.label=='nsrrid') else self.data_dict)
     
     def __getitem__(self, idx):
         filename = self.all_valid_files[idx] # so dict length is longer than all_valid_files length? yeah cause of the diff label

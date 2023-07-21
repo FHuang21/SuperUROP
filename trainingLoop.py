@@ -304,18 +304,26 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 
             new_f1 = computed_metrics["f1_macro"].item() # shoudl be f1_macro if multiple positive labels, 1_f1 if binary
 
-            model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
-            if new_f1 > max_f1:
-                max_f1 = new_f1
-                if 'model_name' in globals():
-                    try:
-                        os.remove(os.path.join(model_path, model_name)) # FIXME:: got file not found error (why??) (cause batch size probably)
-                        print("model removed.")
-                    except:
-                        print("model not removed.")
-                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}.pt"
+            ## temp changes
+            #model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
+            model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_thing_ctrl"
+
+            ## remove this after this training and uncomment the stuff after it
+            if((epoch+1) % 5 == 0):
+                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}_epoch{epoch}.pt"
                 model_save_path = os.path.join(model_path, model_name)
                 torch.save(n_model.state_dict(), model_save_path)
+            # if new_f1 > max_f1:
+            #     max_f1 = new_f1
+            #     if 'model_name' in globals():
+            #         try:
+            #             os.remove(os.path.join(model_path, model_name)) # FIXED
+            #             print("model removed.")
+            #         except:
+            #             print("model not removed.")
+            #     model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}.pt"
+            #     model_save_path = os.path.join(model_path, model_name)
+            #     torch.save(n_model.state_dict(), model_save_path)
 
         torch.cuda.empty_cache()
     

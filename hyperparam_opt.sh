@@ -62,7 +62,7 @@ training_script="trainingLoop.py"
 # CUDA_VISIBLE_DEVICES=1 python $training_script -lr 1e-4 -w 1.0,14.0 --num_classes 2 --dataset shhs2 --label benzo --no_attention &
 
 ## test run to make sure best model saves on each fold
-CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --num_epochs 100 --add_name _best
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --num_epochs 100 --add_name _best --control
 
 
 wait
