@@ -11,7 +11,7 @@ from torchvision import transforms, utils
 import argparse
 from os.path import join
 from scipy.stats import pearsonr, spearmanr
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from scipy.ndimage.interpolation import zoom
 from tqdm import tqdm 
 from ipdb import set_trace as bp 
@@ -685,51 +685,80 @@ class EEG_MAYO_Dataset(Dataset):
             return torch.tensor(self.dict_hy[filename])
 
 class EEG_Encoding_SHHS2_Dataset(Dataset):
-    def __init__(self, args, label='antidep', file="/data/netmit/wifall/ADetect/data/shhs2_new/csv/shhs2-dataset-0.14.0.csv", 
+    def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/shhs2-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/shhs2_new/abdominal_c4_m1"):
-        self.with_attention = args.attention
+        self.no_attention = args.no_attention
         self.file = file # label file
-        self.label = label
+        self.label = args.label
+        self.control = args.control
+        self.tca = args.tca
+        self.ntca = args.ntca
         self.encoding_path = encoding_path
+        self.num_classes = args.num_classes
         self.all_shhs2_encodings = os.listdir(self.encoding_path)
 
         self.data_dict = self.parse_shhs2_antidep()
         self.data_dict_hs = self.parse_shhs2_sf36()
-        self.all_valid_files = list(self.data_dict_hs.keys() if (self.label=="dep" or self.label=="dep-binary") else self.data_dict.keys())
+        self.data_dict_b = self.parse_shhs2_benzos()
+        self.all_valid_files = list(self.data_dict_hs.keys() if self.label=="dep" else self.data_dict.keys())
 
     def parse_shhs2_antidep(self):
         df = pd.read_csv(self.file, encoding='mac_roman')
-        df = df[['nsrrid', 'TCA2', 'NTCA2']]
+        df = df[['nsrrid', 'tca2', 'ntca2']]
         df = df.dropna()
-        output = {f"shhs2-{k}.npz": [v1, v2] for k, v1, v2 in zip(df['nsrrid'], df['TCA2'], df['NTCA2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
+        output = {f"shhs2-{k}.npz": [v1, v2] for k, v1, v2 in zip(df['nsrrid'], df['tca2'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
         return output
+    
+    def parse_shhs2_benzos(self):
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['nsrrid', 'benzod2']]
+        df = df.dropna()
+        output = {f"shhs2-{k}.npz": v for k, v in zip(df['nsrrid'], df['benzod2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
+        return output
+    
+    def threshold_func(self, column, threshold, comparison):
+        if comparison=="less":
+            return column.apply(lambda x: threshold-x+1 if x <= threshold else 0)
+        elif comparison=="greater":
+            return column.apply(lambda x: x-threshold+1 if x >= threshold else 0)
     
     def parse_shhs2_sf36(self):
         df = pd.read_csv(self.file, encoding='mac_roman')
-        df = df[['nsrrid', 'ql209h']]
+        df = df[['nsrrid', 'ql209a', 'ql209b', 'ql209c', 'ql209d', 'ql209e', 'ql209f', 'ql209g', 'ql209h', 'ql209i', 'tca2', 'ntca2']] # all sf-36 questions and total raw score
         df = df.dropna()
-        # and here also drop guys who are on the fence of generally being happy/sad
-        #df = df[(df['ql209h'] != 3) & (df['ql209h'] != 4)] #FIXME::: change back
-        #print(df)
-        #bp()
-        df['ql209h'] = df['ql209h'].apply(lambda x: 1 if x >= 4 else 0) #FIXME::::
+
+        df['label'] = 3*self.threshold_func(df['ql209c'], 4, 'less') + 2*self.threshold_func(df['ql209g'], 3, 'less') \
+                    + self.threshold_func(df['ql209i'], 3, 'less') + self.threshold_func(df['ql209e'], 5, 'greater') \
+                    + self.threshold_func(df['ql209f'], 4, 'less') + self.threshold_func(df['ql209d'], 5, 'greater') \
+                    + self.threshold_func(df['ql209h'], 4, 'greater')
+
+        # df['label'] = df['ql209a'] + df['ql209c'] + df['ql209d'] + df['ql209e'] + df['ql209f'] + df['ql209g'] + df['ql209h'] + df['ql209i']
+        self.th = 5
+        df['label'] = df['label'].apply(lambda x: 1 if x >= self.th else 0) # change later?
         # good
-        label_but_no_enc =  []
-        output = {f"shhs2-{k}.npz": v for k, v in zip(df['nsrrid'], df['ql209h']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
+        if(self.control):
+            output = {f"shhs2-{k}.npz": v for k, v, on_tca, on_ntca in zip(df['nsrrid'], df['label'], df['tca2'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and not (on_tca or on_ntca)}
+        elif(self.tca):
+            output = {f"shhs2-{k}.npz": v for k, v, on_tca in zip(df['nsrrid'], df['label'], df['tca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and on_tca}
+        elif(self.ntca):
+            output = {f"shhs2-{k}.npz": v for k, v, on_ntca in zip(df['nsrrid'], df['label'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and on_ntca}
+        else:
+            output = {f"shhs2-{k}.npz": v for k, v in zip(df['nsrrid'], df['label']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
         #print("output:")
         #print(output)
         return output
     
     def get_label(self, filename):
-        if(self.label == "antidep-binary"):
-            #bp()
+        if(self.label == "antidep" and self.num_classes == 2):
             return torch.tensor((self.data_dict[filename][0] or self.data_dict[filename][1]), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
+        elif(self.label == "benzo"):
+            return torch.tensor(self.data_dict_b[filename], dtype=torch.int64)
         elif(self.label == "antidep"):
-            pass #FIXME::
+            pass #FIXME:::
         elif(self.label == "nsrrid"):
             return filename
-        else:
-            return torch.tensor(self.data_dict[filename], dtype=torch.int64)
+        elif(self.label == "dep"):
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64)
         
     def get_label_from_filename(self, filename):
         on_tca = self.data_dict[filename][0]
@@ -741,31 +770,56 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         else:
             return 0
     
-    def threshold_values(self):
+    def threshold_values(self): # hella inefficient
         #th = 4
         med_names = ['tca', 'ntca', 'control']
-        data = {'>=th':[0,0,0], '<th':[0,0,0]}
+        data = {'pos':[0,0,0], 'neg':[0,0,0]}
         df = pd.DataFrame(data, index=med_names)
 
+        pos_tca = 0
+        pos_ntca = 0
+        pos_control = 0
+        neg_tca = 0
+        neg_ntca = 0
+        neg_control = 0
         for pid in self.data_dict_hs.keys():
             if pid in self.data_dict.keys():
                 is_tca = self.data_dict[pid][0]
                 is_ntca = self.data_dict[pid][1]
                 is_control = 1 if not (is_tca or is_ntca) else 0
                 if self.data_dict_hs[pid] == 1:
-                    df.loc['tca','>=th'] += is_tca
-                    df.loc['ntca','>=th'] += is_ntca
-                    df.loc['control','>=th'] += is_control
+                    df.loc['tca','pos'] += is_tca
+                    df.loc['ntca','pos'] += is_ntca
+                    df.loc['control','pos'] += is_control
+                    pos_tca += is_tca
+                    pos_ntca += is_ntca
+                    pos_control += is_control
                 else:
-                    df.loc['tca','<th'] += is_tca
-                    df.loc['ntca','<th'] += is_ntca
-                    df.loc['control','<th'] += is_control
+                    df.loc['tca','neg'] += is_tca
+                    df.loc['ntca','neg'] += is_ntca
+                    df.loc['control','neg'] += is_control
+                    neg_tca += is_tca
+                    neg_ntca += is_ntca
+                    neg_control += is_control
+
+        new_row_values = {
+            'pos': (1 - (pos_tca+pos_ntca)/(pos_tca+pos_ntca+pos_control)),
+            'neg': (1 - (neg_tca+neg_ntca)/(neg_tca+neg_ntca+neg_control))
+        }
+        new_row_df = pd.DataFrame([new_row_values])
+        df = pd.concat([df, new_row_df], ignore_index=True)
         
-        
+        df['% pos'] = df['pos']/(df['pos']+df['neg'])
+
         return df
         
     def __len__(self):
-        return len(self.data_dict_hs if self.label=="dep" else self.data_dict)
+        if(self.label == "dep"):
+            return len(self.data_dict_hs)
+        elif(self.label == "antidep"):
+            return len(self.data_dict_hs)
+        elif(self.label == "benzo"):
+            return len(self.data_dict_b)
     
     def __getitem__(self, idx):
         filename = self.all_valid_files[idx]
@@ -773,7 +827,7 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         x = np.load(filepath)
         x = dict(x)
         #print(x['br_latent'].shape) # (565, 768) for ex.
-        if self.with_attention:
+        if not self.no_attention:
             feature = x['decoder_eeg_latent'].squeeze(0)
             if feature.shape[0] >= 120:
                 feature = feature[:120, :]
@@ -794,18 +848,29 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         return feature, label
 
 class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
-    def __init__(self, args, label='antidep', file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
+    def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/wsc_new/abdominal_c4_m1"):
-        self.with_attention = args.attention
+        self.no_attention = args.no_attention
         self.file = file # label file
-        self.label = label
+        self.label = args.label
         self.control = args.control
+        self.tca = args.tca
+        self.ssri = args.ssri
+        self.other = args.other
+        self.num_classes = args.num_classes
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
         self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
         self.data_dict_hs = self.parse_wsc_zung()
-        self.all_valid_files = list(self.data_dict_hs.keys() if (self.label=="dep" or self.label=="dep-binary") else self.data_dict.keys())
+        if(self.label == "dep"):
+            self.all_valid_files = list(self.data_dict_hs.keys())
+        elif(self.label == "antidep"):
+            self.all_valid_files = list(self.data_dict.keys())
+        elif(self.label == "benzo"):
+            self.all_valid_files = list(self.data_dict_b.keys())
+        elif(self.label == "nsrrid"):
+            self.all_valid_files = list(self.all_wsc_encodings) ## FIXME:::::
 
     def parse_wsc_antidep(self): # label: depression_med
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -820,11 +885,17 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
     
     def parse_wsc_zung(self): # label: zung_score (> 40 => depressed)
         df = pd.read_csv(self.file, encoding='mac_roman')
-        df = df[['wsc_id', 'wsc_vst', 'zung_score', 'depression_med']] # can change to if control thing
+        df = df[['wsc_id', 'wsc_vst', 'zung_score', 'depression_med','dep_ssri_med', 'dep_tca_med']] # can change to if control thing
         df = df.dropna()
         #df['zung_score'] = df['zung_score'].apply(lambda x: 1 if x >= 40 else 0)
-        if self.control:
-            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, antidep in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not antidep)}
+        if self.control: # hella inefficient
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_antidep in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not on_antidep)}
+        elif self.ssri:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_ssri in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['dep_ssri_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and on_ssri}
+        elif self.tca:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_tca in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['dep_tca_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and on_tca}
+        elif self.other:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_antidep, on_ssri, on_tca in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med'], df['dep_ssri_med'], df['dep_tca_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not on_tca) and (not on_ssri) and on_antidep}
         else:
             output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['zung_score']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
         return output
@@ -832,10 +903,12 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
     def get_label(self, filename):
         if(self.label == "nsrrid"):
             return filename
+        elif(self.label == "dep" and self.num_classes == 2):
+            return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64) 
         elif(self.label == "dep"): # regression w/raw zung score
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
-        elif(self.label == "dep-binary"):
-            return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64) 
+        elif(self.label == "antidep" and self.num_classes == 2):
+            return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
         elif(self.label == "antidep"): # can add thing based on args.num_classes
             #return torch.tensor(self.data_dict[filename][0], dtype=torch.int64) #binary classification
             if(self.data_dict[filename][2]): #ssri
@@ -846,8 +919,6 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
                 return torch.tensor(3)
             else:
                 return torch.tensor(0) #control
-        elif(self.label == "antidep-binary"):
-            return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
 
     def threshold_values(self):
         th = 36
@@ -905,7 +976,7 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         x = dict(x)
         #bp()
         #print(x['br_latent'].shape) # (565, 768) for ex.
-        if self.with_attention:
+        if not self.no_attention:
             feature = x['decoder_eeg_latent'].squeeze(0)
             if feature.shape[0] >= 120:
                 feature = feature[:120, :]

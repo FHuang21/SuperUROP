@@ -2,18 +2,22 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from dataset import EEG_SHHS_Dataset, EEG_SHHS2_Dataset, EEG_MGH_Dataset, EEG_Encoding_SHHS2_Dataset, EEG_Encoding_WSC_Dataset, DatasetCombiner
 from BrEEG.task_spec import SpecDataset, DeepClassifier, get_df
+from sklearn.model_selection import KFold
+from copy import deepcopy
 from tqdm import tqdm
 from ipdb import set_trace as bp
 #import numpy as np
 import argparse
 import os
 from metrics import Metrics
+
+torch.manual_seed(20)
 
 def perf_measure(y_actual, y_hat):
     TP = 0
@@ -58,9 +62,21 @@ def css_to_float_list(css):
 def css_to_int_list(css):
     return [int(i) for i in css.split(",")]
 
+def css_to_bool_list(css):
+    bool_list = []
+    for i in css.split(","):
+        i = int(i)
+        if i==1:
+            bool_list.append(True)
+        elif i==0:
+            bool_list.append(False)
+
+    return bool_list
+
+
 parser = argparse.ArgumentParser(description='trainingLoop w/specified hyperparams')
-parser.add_argument('-lr', type=float, default=1e-4, help='learning rate')
-parser.add_argument('-w', type=str, default='1.0,14.0', help='respective class weights (comma-separated)')
+parser.add_argument('-lr', type=float, default=4e-4, help='learning rate')
+parser.add_argument('-w', type=str, default='1.0,10.0', help='respective class weights (comma-separated)')
 parser.add_argument('--task', type=str, default='multiclass', help='multiclass or regression')
 parser.add_argument('--num_classes', type=int, default=2, help='for multiclass')
 parser.add_argument('--dataset', type=str, default='wsc', help='which dataset to train on')
@@ -78,10 +94,18 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--label', type=str, default='antidep')
 parser.add_argument('--pretrained', action="store_true", default=False)
 parser.add_argument('--model_path', type=str, default="")
+parser.add_argument('--num_folds', type=int, default=5)
+parser.add_argument('--num_heads', type=int, default=3)
 parser.add_argument('--add_name', type=str, default="")
-parser.add_argument('--layers', type=str, default="")
-parser.add_argument('--attention', action='store_true', default=False)
+parser.add_argument('--layer_dims', type=str, default="256,64,16")
+parser.add_argument('--batch_norms', type=str, default="0,0,0")
+parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--no_attention', action='store_true', default=False)
 parser.add_argument('--control', action='store_true', default=False)
+parser.add_argument('--tca', action='store_true', default=False)
+parser.add_argument('--ntca', action='store_true', default=False)
+parser.add_argument('--ssri', action='store_true', default=False)
+parser.add_argument('--other', action='store_true', default=False)
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
 args = parser.parse_args()
 lr = args.lr
@@ -97,23 +121,28 @@ batch_size = args.bs
 arch = args.arch
 debug = args.debug
 num_epochs = args.num_epochs
-add_name = f"_{args.add_name}"
+#num_folds = args.num_folds
+add_name = args.add_name
 pretrained = '_pretrained' if args.pretrained else ''
 model_path = args.model_path
-with_attention = args.attention
-att = "" if not with_attention else "_att"
-layers = css_to_int_list(args.layers) if args.layers!="" else args.layers
+#with_attention = args.attention
+att = "" if args.no_attention else "_att"
+ctrl = "" if not args.control else "_ctrl"
+layer_dims_str = f"_{args.layer_dims}"
+batch_norms_str = f"_{args.batch_norms}"
+args.layer_dims = css_to_int_list(args.layer_dims)
+args.batch_norms = css_to_bool_list(args.batch_norms)
+dpt = args.dropout
+dpt_str = f"_{dpt}"
 print("Label: ", label)
 
 # note: could just pass all my stuff the args list instead of creating variables and filling them in for each thing manually
 
 data_path = '/data/scratch/scadavid/projects/data'
 
-available_devices = range(0, torch.cuda.device_count())
-
-exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_label_{label}{pretrained}{add_name}"
-exp_event_path = os.path.join('tensorboard_log', datatype, dataset_name, num_class_name, exp_name)
-writer = SummaryWriter(log_dir=exp_event_path)
+#available_devices = range(0, torch.cuda.device_count())
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+args.device = device
 
 # initialize DataLoader w/ appropriate dataset (EEG/BB, corresponding dataset)
 is_hao = False
@@ -122,26 +151,27 @@ if (datatype == 'spec'):
     dataset = SpecDataset(dataset_name, 0, 'all', df=get_df(dataset_name, args), transform=train_transform, args=args) # hao says cv parameter doesn't matter
     is_hao = True
 elif (dataset_name == 'shhs2_wsc'):
-    trainset = DatasetCombiner(datasets=[EEG_Encoding_SHHS2_Dataset(args,label=label), EEG_Encoding_WSC_Dataset(args,label=label)], phase='train')
-    testset = DatasetCombiner(datasets=[EEG_Encoding_SHHS2_Dataset(args,label=label), EEG_Encoding_WSC_Dataset(args,label=label)], phase='val')
+    trainset = DatasetCombiner(datasets=[EEG_Encoding_SHHS2_Dataset(args), EEG_Encoding_WSC_Dataset(args)], phase='train')
+    testset = DatasetCombiner(datasets=[EEG_Encoding_SHHS2_Dataset(args), EEG_Encoding_WSC_Dataset(args)], phase='val')
 elif (dataset_name == 'shhs1'):
     dataset = EEG_SHHS_Dataset(args)
 elif (dataset_name == 'shhs2' and (datatype == 'eeg' or datatype == 'bb')):
     dataset = EEG_SHHS2_Dataset(args)
 elif (dataset_name == 'shhs2' and datatype == 'encoding'):
-    dataset = EEG_Encoding_SHHS2_Dataset(args, label=label)
+    dataset = EEG_Encoding_SHHS2_Dataset(args)
 elif (dataset_name == 'wsc'):
-    dataset = EEG_Encoding_WSC_Dataset(args, label=label)
+    dataset = EEG_Encoding_WSC_Dataset(args)
 elif (dataset_name == 'mgh'):
     dataset = EEG_MGH_Dataset(args)
+
 # decide which model to use
 if (data_source == 'eeg' and datatype == 'ts'):
-    model = nn.DataParallel(nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(available_devices[0]), available_devices)
-elif (datatype == 'encoding' and with_attention):
-    model = SimpleAttentionPredictor(layer_dims=layers, output_dim=num_classes).to(available_devices[0]) if layers!="" else SimpleAttentionPredictor(output_dim=num_classes).to(available_devices[0])
+    model = nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
+elif (datatype == 'encoding' and not args.no_attention):
+    model = SimpleAttentionPredictor(args).to(device)
     print("simple attention predictor")
 elif (datatype == 'encoding'):
-    model = SimplePredictor(output_dim=num_classes).to(available_devices[0]) if layers=="" else SimplePredictor(output_dim=num_classes, layer_dims=layers).to(available_devices[0])
+    model = SimplePredictor(output_dim=num_classes).to(device)
     print("simple predictor model")
     if (args.pretrained):
         ## FIXME: this doesn't work if you want to load a model from different dataset/different input data
@@ -151,116 +181,144 @@ elif (datatype == 'encoding'):
         # del state_dict['fc_final.bias']
         modules = [child for child in model.children()]
         modules = modules[:-1]
-        model = nn.Sequential(*modules, nn.Linear(modules[-1][0].out_features, num_classes)).to(available_devices[0])
+        model = nn.Sequential(*modules, nn.Linear(modules[-1][0].out_features, num_classes)).to(device)
         # bp()
         # model.load_state_dict(state_dict)
         print("nice!")
 elif (data_source == 'bb' and datatype == 'ts'):
-    model = nn.DataParallel(nn.Sequential(BBEncoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(available_devices[0]), available_devices)
+    model = nn.Sequential(BBEncoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
 else: # DeepClassifier can be used for both EEG and BR spectrograms
-    model = nn.DataParallel(DeepClassifier(args).to(available_devices[0]), available_devices)
+    model = DeepClassifier(args).to(device)
 
-gen = torch.Generator()
-gen.manual_seed(20)
-if 'trainset' not in globals() or 'testset' not in globals(): # i.e. haven't combined datasets
-    trainset, testset = random_split(dataset, [0.7, 0.3], generator=gen)
-train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False) # don't shuffle cause not training on the test set
+# gen = torch.Generator()
+# gen.manual_seed(20)
+# if 'trainset' not in globals() or 'testset' not in globals(): # i.e. haven't combined datasets
+#     trainset, testset = random_split(dataset, [0.7, 0.3], generator=gen)
+# train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+# test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False) # don't shuffle cause not training on the test set
 
-## get # pos instances
-num_pos_train = 0
-threshold = 40.0 # or change to 50...but otherwise v few positive labels
-for X_batch, y_batch in trainset:
-    #y_batch = torch.where(y_batch < threshold, torch.tensor(0), torch.tensor(1))
-    num_pos_train += y_batch.sum().item()
-num_pos_val = 0
-for X_batch, y_batch in testset:
-    #y_batch = torch.where(y_batch < threshold, torch.tensor(0), torch.tensor(1))
-    num_pos_val += y_batch.sum().item()
-print("length trainset: ", len(trainset))
-print("num pos in train: ", num_pos_train)
-print("length testset: ", len(testset))
-print("num pos in val: ", num_pos_val)
+#torch.manual_seed(20) # for when torch shuffles the train loader
 
-## **** about to implement k-fold cross validation ***
-#bp()
+kfold = KFold(n_splits=args.num_folds, shuffle=True, random_state=20)
 
-class_weights = torch.tensor(weights, dtype=torch.float32).to(available_devices[0])
-loss_fn = nn.CrossEntropyLoss(weight=class_weights) if task=='multiclass' else nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=lr)
-scheduler = lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
+# current_fold = 1
+for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
+    print("----FOLD ", fold, "----")
 
-metrics = Metrics(args)
+    n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
 
-max_f1 = -1.0
-for epoch in tqdm(range(num_epochs)):
-    running_loss = 0.0
-    model.train()
+    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
+    exp_event_path = os.path.join('tensorboard_log', datatype, dataset_name, label, num_class_name, exp_name)
+    writer = SummaryWriter(log_dir=exp_event_path)
+
+    # train_subsampler = SubsetRandomSampler(train_ids, generator=gen)
+    # test_subsampler = SubsetRandomSampler(test_ids)
+    trainset = Subset(dataset, train_ids)
+    testset = Subset(dataset, test_ids)
+    train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False)
+
     #bp()
-    for X_batch, y_batch in tqdm(train_loader):
-        # if (batch_size != len(y_batch)): # DataParallel issue...
-        #     continue
-        #print("X_batch shape: ", X_batch.shape)
-        X_batch = X_batch.cuda()
-        y_batch = y_batch.cuda()
+    # ## get # pos instances
+    # num_pos_train = 0
+    # for X_batch, y_batch in train_loader:
+    #     #y_batch = torch.where(y_batch < threshold, torch.tensor(0), torch.tensor(1))
+    #     num_pos_train += y_batch.sum().item()
+    # num_pos_val = 0
+    # for X_batch, y_batch in test_loader:
+    #     #y_batch = torch.where(y_batch < threshold, torch.tensor(0), torch.tensor(1))
+    #     num_pos_val += y_batch.sum().item()
+    # print("length trainset: ", len(trainset))
+    # print("num pos in train: ", num_pos_train)
+    # print("length testset: ", len(testset))
+    # print("num pos in val: ", num_pos_val)
 
-        y_pred = model(X_batch) if not is_hao else model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
-        #bp()
-        loss = loss_fn(y_pred, y_batch)
-        running_loss += loss.item()
+    ## **** about to implement k-fold cross validation ***
+    #bp()
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
+    loss_fn = nn.CrossEntropyLoss(weight=class_weights) if task=='multiclass' else nn.MSELoss()
+    optimizer = optim.Adam(n_model.parameters(), lr=lr)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
 
-        metrics.fill_metrics(y_pred, y_batch)
+    metrics = Metrics(args)
 
-    epoch_loss = running_loss / len(train_loader)
-    print("epoch_loss: ", epoch_loss)
-    computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
-    logger(writer, computed_metrics, 'train', epoch)
-    metrics.clear_metrics()
-
-    scheduler.step()
-
-    model.eval()
-    with torch.no_grad():
-
+    max_f1 = -1.0
+    for epoch in tqdm(range(num_epochs)):
         running_loss = 0.0
-        for X_batch, y_batch in test_loader:
-            # if (batch_size != len(y_batch)):
+        n_model.train()
+        #bp()
+        for X_batch, y_batch in tqdm(train_loader):
+            # if (batch_size != len(y_batch)): # DataParallel issue...
             #     continue
-            X_batch = X_batch.cuda()
-            y_batch = y_batch.cuda()
-            y_pred = model(X_batch) if not is_hao else model(X_batch)[0]
-            # print("y_pred shape: ", y_pred.shape)
-            # print("y_batch shape: ", y_batch.shape)
-            loss = loss_fn(y_pred, y_batch)
+            #print("X_batch shape: ", X_batch.shape)
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
 
+           # bp()
+            y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
+
+            loss = loss_fn(y_pred, y_batch)
             running_loss += loss.item()
 
-            # print("y_pred: ", y_pred)
-            # print("y_batch: ", y_batch)
-            # print("loss: ", loss)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
             metrics.fill_metrics(y_pred, y_batch)
 
-        epoch_loss = running_loss / len(test_loader)
+        epoch_loss = running_loss / len(train_loader)
+        print("epoch_loss: ", epoch_loss)
         computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
-        logger(writer, computed_metrics, 'val', epoch)
+        logger(writer, computed_metrics, 'train', epoch)
         metrics.clear_metrics()
 
-        new_f1 = computed_metrics["f1_macro"].item() # shoudl be f1_macro if multiple positive labels, 1_f1 if binary
+        scheduler.step()
 
-        model_path = os.path.join(data_path, 'models', datatype, dataset_name, num_class_name, data_source)
-        if new_f1 > max_f1:
-            max_f1 = new_f1
-            if 'model_name' in globals():
-                os.remove(os.path.join(model_path, model_name)) # delete older, worse model (is this necessary?)
-            model_name = f"lr_{lr}_w_{args.w}_f1macro_{round(max_f1, 2)}_{label}_{args.layers}{pretrained}{att}.pt"
-            model_save_path = os.path.join(model_path, model_name)
-            torch.save(model.state_dict(), model_save_path)
+        n_model.eval()
+        with torch.no_grad():
 
-    torch.cuda.empty_cache()
+            running_loss = 0.0
+            for X_batch, y_batch in test_loader:
+                # if (batch_size != len(y_batch)):
+                #     continue
+                X_batch = X_batch.to(device)
+                y_batch = y_batch.to(device)
+                y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0]
+                # print("y_pred shape: ", y_pred.shape)
+                # print("y_batch shape: ", y_batch.shape)
+                loss = loss_fn(y_pred, y_batch)
 
-writer.close()
+                running_loss += loss.item()
+
+                # print("y_pred: ", y_pred)
+                # print("y_batch: ", y_batch)
+                # print("loss: ", loss)
+
+                metrics.fill_metrics(y_pred, y_batch)
+
+            epoch_loss = running_loss / len(test_loader)
+            computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
+            logger(writer, computed_metrics, 'val', epoch)
+            metrics.clear_metrics()
+
+            new_f1 = computed_metrics["f1_macro"].item() # shoudl be f1_macro if multiple positive labels, 1_f1 if binary
+
+            model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
+            if new_f1 > max_f1:
+                max_f1 = new_f1
+                if 'model_name' in globals():
+                    try:
+                        os.remove(os.path.join(model_path, model_name)) # FIXME:: got file not found error (why??) (cause batch size probably)
+                        print("model removed.")
+                    except:
+                        print("model not removed.")
+                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}.pt"
+                model_save_path = os.path.join(model_path, model_name)
+                torch.save(n_model.state_dict(), model_save_path)
+
+        torch.cuda.empty_cache()
+    
+    model_name = "" # otherwise it overwrites the best model from the previous fold
+
+    writer.close()

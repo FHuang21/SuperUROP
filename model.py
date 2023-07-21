@@ -1,6 +1,6 @@
 import torch 
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional as F
 from ipdb import set_trace as bp
 from dataset import EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
@@ -43,16 +43,16 @@ def get_rnn(Scale,
 
     return lstm
 
-def fc_block(in_channels: int, out_channels: int, is_bn=True) -> nn.Module:
+def fc_block(in_channels: int, out_channels: int, is_bn=True, dropout=0.5) -> nn.Module:
     return nn.Sequential(
         nn.Linear(in_channels, out_channels),
         nn.BatchNorm1d(out_channels),
         nn.ReLU(),
-        nn.Dropout(0.5),
+        nn.Dropout(dropout),
     ) if is_bn else nn.Sequential(
         nn.Linear(in_channels, out_channels),
         nn.ReLU(),
-        nn.Dropout(0.5),
+        nn.Dropout(dropout),
     )
 
 class DumpRNN(nn.Module):
@@ -510,37 +510,57 @@ class SimplePredictor(nn.Module):
         return pred
 
 class SimpleAttentionPredictor(nn.Module):
-    def __init__(self, layer_dims=[256,64,16], encoding_width=768, output_dim=2):
+    def __init__(self, args, encoding_width=768):
         super(SimpleAttentionPredictor, self).__init__()
-        self.output_dim = output_dim
-        self.attention = AttentionCondensation(input_size=encoding_width, hidden_size=layer_dims[0])
-        self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=False)
-        self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=False)
-        self.fc_final = nn.Linear(layer_dims[2], output_dim)
+        self.num_classes = args.num_classes
+        bns = args.batch_norms
+        layer_dims = args.layer_dims
+        self.attention = AttentionCondensation(input_size=encoding_width, hidden_size=layer_dims[0], num_heads=args.num_heads)
+        #self.fc1 = fc_block(layer_dims[0]*args.num_heads, layer_dims[0], is_bn=bns[0], dropout=args.dropout)
+        #self.fc2 = fc_block(layer_dims[0], layer_dims[1], is_bn=bns[1], dropout=args.dropout)
+        self.fc2 = fc_block(layer_dims[0]*args.num_heads, layer_dims[1], is_bn=bns[1], dropout=args.dropout) # rename to fc2
+        self.fc3 = fc_block(layer_dims[1], layer_dims[2], is_bn=bns[2], dropout=args.dropout) # rename to fc3
+        self.fc_final = nn.Linear(layer_dims[2], self.num_classes)
 
     def forward(self, x):
         #bp()
         x = self.attention(x)
+        #x = self.fc1(x)
         x = self.fc2(x)
         x = self.fc3(x)
         pred = self.fc_final(x)
-        if(self.output_dim==1):
+        if(self.num_classes == 1):
             pred = pred.squeeze(1)
         return pred
 
 class AttentionCondensation(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, num_heads):
         super(AttentionCondensation, self).__init__()
-        self.value_layer = nn.Linear(input_size, hidden_size)
-        self.query_layer = nn.Linear(input_size, 1)
+        self.value_layer = nn.ModuleList([nn.Linear(input_size, hidden_size) for i in range(num_heads)])
+        self.query_layer = nn.ModuleList([nn.Linear(input_size, 1) for i in range(num_heads)])
         self.softmax = nn.Softmax(dim=1)
+        self.num_heads = num_heads
         
     def forward(self, x):
-        query = self.softmax(self.query_layer(x))
-        values = self.value_layer(x)
-        #bp()
-        attended_output = torch.matmul(query.permute(0, 2, 1), values)
-        return attended_output.permute(0,2,1).squeeze(2)
+        query = [self.softmax(self.query_layer[i](x)) for i in range(self.num_heads)]
+        values = [self.value_layer[i](x) for i in range(self.num_heads)]
+        attended_output = [torch.matmul(query[i].permute(0, 2, 1), values[i]).permute(0,2,1).squeeze(2) for i in range(self.num_heads)]
+        total_output = torch.cat(attended_output, dim=1)
+        return total_output
+
+# class AttentionCondensation(nn.Module):
+#     def __init__(self, input_size, hidden_size):
+#         super(AttentionCondensation, self).__init__()
+#         self.value_layer = nn.Linear(input_size, hidden_size)
+#         self.query_layer = nn.Linear(input_size, 1)
+#         self.softmax = nn.Softmax(dim=1)
+        
+#     def forward(self, x):
+#         query = self.softmax(self.query_layer(x))
+#         values = self.value_layer(x)
+#         #bp()
+#         attended_output = torch.matmul(query.permute(0, 2, 1), values)
+#         return attended_output.permute(0,2,1).squeeze(2)
 
 # class SimpleRegressor(nn.Module):
 #     def __init__(self, layer_dims=[256,64,16], encoding_width=768):

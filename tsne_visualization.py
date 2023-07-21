@@ -16,7 +16,7 @@ from torch.utils.data import random_split, DataLoader
 # from model import BreathStageNet
 import umap 
 from torch import nn
-from model import BranchHYPredictor, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, StagePredictorModel, SimplePredictor
+from model import BranchHYPredictor, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, StagePredictorModel, SimpleAttentionPredictor
 from dataset import *
 import argparse
 parser = argparse.ArgumentParser()
@@ -74,7 +74,9 @@ args.num_channel = 256
 # dataloaders['train'] = DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=False)
 # dataloaders['val'] = DataLoader(valset, batch_size=BATCH_SIZE, shuffle=False)
 
-dataset = EEG_Encoding_WSC_Dataset(label='nsrrid')
+args.control = False; args.tca = False; args.ssri = False; args.other = False; args.no_attention = True; 
+args.label = 'nsrrid'
+dataset = EEG_Encoding_WSC_Dataset(args)
 #dataset2 = EEG_Encoding_WSC_Dataset(label='nsrrid')
 trainset, valset = get_both_set(dataset)
 
@@ -134,8 +136,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # instantiate model and load weights
 #shhs2_model_path = "/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/lr_0.001_w1_1.0_w2_14.0_posf1_0.6.pt"
 #wsc_model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/lr_0.001_w1_1.0_w2_14.0_posf1_0.68.pt"
-wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/lr_4e-05_w1_1.0_w2_14.0_posf1_0.43.pt"
-model = SimplePredictor().to(device)
+wsc_happysadmodel_path = "~/Desktop/lr_0.0004_w_1.0,10.0_bs_16_f1macro_0.57_256,64,16_bns_0,0,0_heads3_0.5_att_ctrl_fold4.pt"
+model = SimpleAttentionPredictor().to(device)
 state_dict = torch.load(wsc_happysadmodel_path)
 model.load_state_dict(state_dict)
 

@@ -43,8 +43,27 @@ training_script="trainingLoop.py"
 
 ## binary happy/sad w/36 threshold, only control people
 #CUDA_VISIBLE_DEVICES=0 python $training_script -lr 1e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep-binary --control --add_name _control_th_36_no_att
-CUDA_VISIBLE_DEVICES=1 python $training_script -lr 2e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep-binary --control --add_name _control_th_36_no_att &
-CUDA_VISIBLE_DEVICES=2 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep-binary --control --add_name _control_th_36_no_att &
+#CUDA_VISIBLE_DEVICES=1 python $training_script -lr 2e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep-binary --control --add_name _control_th_36_no_att #&
+#CUDA_VISIBLE_DEVICES=2 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep-binary --control --add_name _control_th_36_no_att &
+
+## testing k-fold stuff
+#CUDA_VISIBLE_DEVICES=0 python $training_script -lr 1e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label antidep --num_epochs 50
+
+## multi-head attention hyperparam tuning
+# CUDA_VISIBLE_DEVICES=0 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16 --dropout 0 --control --add_name _dropout0_nofc0 &
+# CUDA_VISIBLE_DEVICES=1 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16 --batch_norms 0,0,0 --control --add_name _bn00_nofc0 &
+# CUDA_VISIBLE_DEVICES=2 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16 --batch_norms 0,1,0 --control --add_name _bn10_nofc0 &
+# CUDA_VISIBLE_DEVICES=3 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16  --batch_norms 0,0,1 --control --add_name _bn01_nofc0 &
+# CUDA_VISIBLE_DEVICES=0 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16  --batch_norms 0,1,1 --control --add_name _bn11_nofc0 &
+# CUDA_VISIBLE_DEVICES=1 python $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --layer 256,64,16 --num_heads 3 -bs 16 --dropout 0.5 --control --add_name _dropout0.5_nofc0 &
+
+## retrain shhs2 antidep predictor (lr 0.001)
+# CUDA_VISIBLE_DEVICES=0 python $training_script -lr 1e-3 -w 1.0,14.0 --num_classes 2 --dataset shhs2 --label benzo --no_attention &
+# CUDA_VISIBLE_DEVICES=1 python $training_script -lr 1e-4 -w 1.0,14.0 --num_classes 2 --dataset shhs2 --label benzo --no_attention &
+
+## test run to make sure best model saves on each fold
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --num_epochs 100 --add_name _best
+
 
 wait
 echo "All trainings complete!"

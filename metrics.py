@@ -51,23 +51,23 @@ class Metrics():
         
         #if self.args.task == 'multiclass':
         classifier_metrics_dict = {
-            "acc": torchmetrics.Accuracy(task='multiclass',num_classes=self.num_classes).cuda(),#.to(self.args.device),
+            "acc": torchmetrics.Accuracy(task='multiclass',num_classes=self.num_classes).to(self.args.device),
 
-            "kappa": torchmetrics.CohenKappa(task='multiclass',num_classes=self.num_classes).cuda(),#.to(self.args.device),
+            "kappa": torchmetrics.CohenKappa(task='multiclass',num_classes=self.num_classes).to(self.args.device),
 
-            #"prec": torchmetrics.Precision(task = "multiclass",num_classes=self.num_classes, average = None).cuda(),#.to(self.args.device),
+            #"prec": torchmetrics.Precision(task = "multiclass",num_classes=self.num_classes, average = None).to(self.args.device),
 
-            #"recall": torchmetrics.Recall(task = "multiclass",num_classes=self.num_classes, average = None).cuda(),#.to(self.args.device),
+            #"recall": torchmetrics.Recall(task = "multiclass",num_classes=self.num_classes, average = None).to(self.args.device),
 
-            "f1_macro": torchmetrics.F1Score(task = "multiclass", num_classes=self.num_classes, average = "macro").cuda(),
+            "f1_macro": torchmetrics.F1Score(task = "multiclass", num_classes=self.num_classes, average = "macro").to(self.args.device),
 
-            "f1_c": torchmetrics.classification.MulticlassF1Score(num_classes=self.num_classes, average = None).cuda()#.to(self.args.device)
+            "f1_c": torchmetrics.classification.MulticlassF1Score(num_classes=self.num_classes, average = None).to(self.args.device)
         } 
 
         if self.args.task == 'regression':
-            classifier_metrics_dict["mae"] = torchmetrics.MeanAbsoluteError().cuda()#.to(self.args.device)
+            classifier_metrics_dict["mae"] = torchmetrics.MeanAbsoluteError().to(self.args.device)
             #classifier_metrics_dict["expvar"] = torchmetrics.ExplainedVariance().cuda()#.to(self.args.device)
-            classifier_metrics_dict["r2"] = torchmetrics.R2Score().cuda()#.to(self.args.device)
+            classifier_metrics_dict["r2"] = torchmetrics.R2Score().to(self.args.device)
         
         self.classifier_metrics_dict = classifier_metrics_dict
             
