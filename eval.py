@@ -44,10 +44,10 @@ model = SimonModel(args)
 state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 
+## NOTE: CHANGE THE ANTIDEP SUBSET ARGS APPROPRIATELY
 args.no_attention = False; args.label = "dep"; args.tca = False; args.ssri = False; args.other = False; args.control = False
 
 dataset = EEG_Encoding_WSC_Dataset(args)
-# NOTE: UNCOMMENT THE FOLLOWING IF DOING CONTROL SUBSET
 # kfold = KFold(n_splits=5, shuffle=True, random_state=20)
 # train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(dataset)][0]
 # trainset = Subset(dataset, train_ids)
@@ -57,20 +57,25 @@ dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 y_pred = []
 y_true = []
 #bp()
-softmax = nn.Softmax(dim=1)
+#softmax = nn.Softmax(dim=1)
 num_pos = 0
 with torch.no_grad():
     for X, y in dataloader:
         pred = model(X).detach().numpy()
-        pred = softmax(pred)[0][0] # NOTE: CHANGE SECOND SUBSCRIPT TO 1 IF WANT THE OTHER CLASS'S ROC CURVE
+        pred = np.argmax(pred, axis=1)
         y_pred.append(pred)
         num_pos += (1 if pred==1 else 0)
         y = y.detach().numpy()
         y_true.append(y)
+percent_pos = num_pos / len(y_pred)
+print("% positive: ", percent_pos)
 
+# Calculate class-wise precision
+precision_classwise = precision_score(y_true, y_pred, average=None)
 
+# Calculate class-wise recall
+recall_classwise = recall_score(y_true, y_pred, average=None)
 
-fig, ax = plt.subplots()
-plot_auroc(ax, y_true, y_pred)
-figure_savepath = "/data/scratch/alimirz/2023/bruh_figures" #FIXME::::::
-plt.savefig(os.path.join(figure_savepath,"nmodel_ROC_neg.pdf"))
+print("Class-wise Precision:", precision_classwise)
+print("Class-wise Recall:", recall_classwise)
+
