@@ -16,7 +16,7 @@ from torch.utils.data import random_split, DataLoader, Subset
 # from model import BreathStageNet
 import umap 
 from torch import nn
-from model import BranchHYPredictor, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, StagePredictorModel, SimpleAttentionPredictor
+from model import BranchHYPredictor, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, StagePredictorModel, SimpleAttentionPredictor, SimonModel
 from sklearn.model_selection import KFold
 from dataset import *
 import argparse
@@ -30,11 +30,11 @@ MODEL_PATH = os.path.join(ROOT_DIR,EXPERIMENT,MODEL)
 modeldir = os.path.join(ROOT_DIR,EXPERIMENT)
 
 MAX_NUMBER_PATIENTS = 10000 
-BATCH_SIZE = 4
-LATENT_SPACE_SIZE = 64
+BATCH_SIZE = 16
+LATENT_SPACE_SIZE = 8
 
 
-
+datasets = {}
 dataloaders = {}
 
 # dataset = UdallBreathingStagesDataset(root_dir='/data/scratch/alimirz/DATA/UDALL_BREATHING_STAGES/')
@@ -75,17 +75,22 @@ args.num_channel = 256
 # dataloaders['ctrl_train'] = DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=False)
 # dataloaders['ctrl_val'] = DataLoader(valset, batch_size=BATCH_SIZE, shuffle=False)
 
-args.control = True; args.tca = False; args.ssri = False; args.other = False; args.no_attention = False; args.num_classes = 2; args.batch_norms = [False,False,False]
-args.layer_dims = [256,64,16]; args.num_heads = 3; args.dropout = 0.5
+args.control = True; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.no_attention = False; args.num_classes = 2
+args.remove_non_antidep = True 
+args.batch_norms = [False,False,False]
+args.layer_dims = [256,64,16]; args.num_heads = 4; args.dropout = 0.5
 args.label = 'nsrrid'
-dataset = EEG_Encoding_WSC_Dataset(args)
+wsc_ctrl_dataset = EEG_Encoding_WSC_Dataset(args)
 kfold = KFold(n_splits=5, shuffle=True, random_state=20)
 #bp()
-train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(dataset)][4]
-trainset = Subset(dataset, train_ids)
-valset = Subset(dataset, test_ids)
+train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(wsc_ctrl_dataset)][0]
+trainset = Subset(wsc_ctrl_dataset, train_ids)
+valset = Subset(wsc_ctrl_dataset, test_ids)
+# both wsc ctrl:
 dataloaders['ctrl_train'] = DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=False)
 dataloaders['ctrl_val'] = DataLoader(valset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['ctrl_train'] = trainset
+datasets['ctrl_val'] = valset
 #dataset2 = EEG_Encoding_WSC_Dataset(label='nsrrid')
 #trainset, valset = get_both_set(dataset)
 
@@ -95,27 +100,33 @@ args.control = False
 args.tca = True
 wsc_tca_dataset = EEG_Encoding_WSC_Dataset(args)
 dataloaders['wsc_tca_val'] = DataLoader(wsc_tca_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['wsc_tca_val'] = wsc_tca_dataset
 args.tca = False
 args.ssri = True
 wsc_ssri_dataset = EEG_Encoding_WSC_Dataset(args)
 dataloaders['wsc_ssri_val'] = DataLoader(wsc_ssri_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['wsc_ssri_val'] = wsc_ssri_dataset
 args.ssri = False
 args.other = True
 wsc_other_dataset = EEG_Encoding_WSC_Dataset(args)
 dataloaders['wsc_other_val'] = DataLoader(wsc_other_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['wsc_other_val'] = wsc_other_dataset
 args.other = False
 
 args.control = True
 shhs2_ctrl_dataset = EEG_Encoding_SHHS2_Dataset(args)
 dataloaders['shhs2_ctrl_val'] = DataLoader(shhs2_ctrl_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['shhs2_ctrl_val'] = shhs2_ctrl_dataset
 args.control = False
 args.tca = True
 shhs2_tca_dataset = EEG_Encoding_SHHS2_Dataset(args)
 dataloaders['shhs2_tca_val'] = DataLoader(shhs2_tca_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['shhs2_tca_val'] = shhs2_tca_dataset
 args.tca = False
 args.ntca = True
 shhs2_ntca_dataset = EEG_Encoding_SHHS2_Dataset(args)
 dataloaders['shhs2_ntca_val'] = DataLoader(shhs2_ntca_dataset, batch_size=BATCH_SIZE, shuffle=False)
+datasets['shhs2_ntca_val'] = shhs2_ntca_dataset
 args.ntca = False
 
 
@@ -140,6 +151,7 @@ groups = wsc_groups + shhs2_groups
 raw_outputs = {}
 raw_labels = {}
 
+#bp() #shhs2 ctrl val is a problem....
 for group in groups:
     raw_outputs[group] = np.zeros((len(dataloaders[group])*BATCH_SIZE, LATENT_SPACE_SIZE))
     raw_labels[group] = np.zeros(len(dataloaders[group])*BATCH_SIZE, dtype=object)
@@ -184,8 +196,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #wsc_model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/lr_0.001_w1_1.0_w2_14.0_posf1_0.68.pt"
 
 ##FIXME::: to best model once it's done training
-wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/lr_0.0004_w_1.0,10.0_bs_16_f1macro_0.57_256,64,16_bns_0,0,0_heads3_0.5_att_ctrl_fold4.pt"
-model = SimpleAttentionPredictor(args).to(device)
+#wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/lr_0.0004_w_1.0,10.0_bs_16_f1macro_0.57_256,64,16_bns_0,0,0_heads3_0.5_att_ctrl_fold4.pt"
+wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
+args.hidden_size = 8
+args.fc2_size = 32
+args.attention = True
+model = SimonModel(args).to(device)
 state_dict = torch.load(wsc_happysadmodel_path)
 model.load_state_dict(state_dict)
 
@@ -236,9 +252,10 @@ for group in groups:
             
             with torch.set_grad_enabled(False):
                 #bp()
-                eeg_output = model.attention(eeg)
-                age_output1 = model.fc2(eeg_output) # output is 64 dims
-                
+                # eeg_output = model.attention(eeg)
+                # age_output1 = model.fc2(eeg_output) # output is 64 dims
+                age_output1 = model.fc1(model.encoder(eeg))
+                # bp()
                 # features, code, pred_class = model(breathing, stages)
                 raw_outputs[group][i] = age_output1.cpu().numpy().flatten()
                 raw_labels[group][i] = labels
@@ -333,33 +350,54 @@ perplexities = [64]
 #     all_plots.append( plt.subplots(2,2, figsize=(12,10)))
 fig, axs = plt.subplots(2,4, figsize=(18,10))
 
+#bp()
 if True:
+    #tsne_x = np.concatenate([raw_outputs[group] for group in groups], dtype=np.float32) #FIXME
+    tsne_x = raw_outputs['ctrl_train']
     i=0 # 64 dim
     umap_model = umap.UMAP(n_neighbors=10, min_dist=0.1, metric='euclidean')
-    umap_embeddings_train = umap_model.fit_transform(tsne_x_train)
-    umap_embeddings_val = umap_model.transform(tsne_x_val)
-    df_train = pd.DataFrame()
-    df_val = pd.DataFrame()
+    # umap_embeddings_train = umap_model.fit_transform(tsne_x_train)
+    # umap_embeddings_val = umap_model.transform(tsne_x_val)
+    umap_transform_all = umap_model.fit(tsne_x) # this takes a while...
+    # df_train = pd.DataFrame()
+    # df_val = pd.DataFrame()
+    df = pd.DataFrame()
     
     # df2["y"] = tsne_y
-    df_train["comp-1"] = umap_embeddings_train[:,0]
-    df_train["comp-2"] = umap_embeddings_train[:,1]
-    df_val["comp-1"] = umap_embeddings_val[:,0]
-    
-    df_val["comp-2"] = umap_embeddings_val[:,1]
-    
-    for j, phase in enumerate(['ctrl_train','ctrl_val']):
-        # ax = all_plots[j][1][i//2,i%2]
-        df = df_train if phase == 'ctrl_train' else df_val
-        hues_pid = np.array(raw_labels[phase].tolist())
+    # df_train["comp-1"] = umap_embeddings_train[:,0]
+    # df_train["comp-2"] = umap_embeddings_train[:,1]
+    # df_val["comp-1"] = umap_embeddings_val[:,0]
+    # df_val["comp-2"] = umap_embeddings_val[:,1]
+
+    for j, group in enumerate(groups):
+        
         #bp()
-        hues_gender = [str(dataset.get_label_from_filename(item)) for item in hues_pid]
+        dataset = datasets[group]
+        # janky:
+        if group=="ctrl_train" or group=="ctrl_val":
+            dataset = wsc_ctrl_dataset # necessary since 'Subset' types don't inherit the get_label_from_filename method i defined in the custom class implementation
+
+        tsne_x_group = raw_outputs[group]
+
+        group_embedding = umap_transform_all.transform(tsne_x_group)
+       # bp()
+        df["comp-1"] = group_embedding[:,0]
+        df["comp-2"] = group_embedding[:,1]
+        
+        # df["comp-1"] = umap_embeddings_all[:,0]
+        # df["comp-2"] = umap_embeddings_all[:,1]
+        # ax = all_plots[j][1][i//2,i%2]
+        # df = df_train if phase == 'ctrl_train' else df_val
+        hues_pid = np.array(raw_labels[group].tolist())
+        #bp()
+        hues_gender = [str(dataset.get_label_from_filename(item)) for item in hues_pid if item in dataset.data_dict.keys()] # keyerror with wsc_tca_val... if n/a on antidep, ignore
+        # ^ could add if to check if in antidep dict (dataset.data_dict.keys())
         hues_sadbinary = []
         for item in hues_pid:
             try:
-                hues_sadbinary.append(dataset.get_happysad_from_filename(item))
+                hues_sadbinary.append(dataset.get_label_from_filename(item))
             except:
-                hues_sadbinary.append(-1)
+                #hues_sadbinary.append(-1)
                 print('problem')
         # hues_age = [str(int(labeler.get_age(int(item)))) for item in hues_pid]
         # hues_pd = [str(labeler.get_pd(item)) for item in hues_pid]
@@ -373,13 +411,48 @@ if True:
         # axs[j,i].get_xaxis().set_visible(False)
         # axs[j,i].get_yaxis().set_visible(False)
         # axs[j,i].get_legend().remove()
-        sns.scatterplot(ax=axs[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
-                        data=df, linewidth=0, s=8).set(title=phase+" UMAP projection, Perplexity: "+str(perplexities[i]))
-        axs[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-        axs[j].get_xaxis().set_visible(False)
-        axs[j].get_yaxis().set_visible(False)
-        axs[j].get_legend().remove()
+        sns.scatterplot(ax=axs.flatten()[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
+                        data=df, linewidth=0, s=8).set(title=group+" UMAP, Perplexity: "+str(perplexities[i]))
+        axs.flatten()[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+        axs.flatten()[j].get_xaxis().set_visible(False)
+        axs.flatten()[j].get_yaxis().set_visible(False)
+        axs.flatten()[j].get_legend().remove()
         #bp()
+        df.drop(df.index, inplace=True) # otherwise df dim mismatch when assigning values to it again
+    
+    ### old stuff ###
+    # for j, phase in enumerate(['ctrl_train','ctrl_val']):
+    #     # ax = all_plots[j][1][i//2,i%2]
+    #     df = df_train if phase == 'ctrl_train' else df_val
+    #     hues_pid = np.array(raw_labels[phase].tolist())
+    #     #bp()
+    #     hues_gender = [str(dataset.get_label_from_filename(item)) for item in hues_pid]
+    #     hues_sadbinary = []
+    #     for item in hues_pid:
+    #         try:
+    #             hues_sadbinary.append(dataset.get_happysad_from_filename(item))
+    #         except:
+    #             hues_sadbinary.append(-1)
+    #             print('problem')
+    #     # hues_age = [str(int(labeler.get_age(int(item)))) for item in hues_pid]
+    #     # hues_pd = [str(labeler.get_pd(item)) for item in hues_pid]
+    #     # bp()
+    #     # hues_pidd = [str(int(item)) for item in hues_pid]
+    #     #sns.set_palette("viridis")
+    #     Palette = {'0':'lightgrey', '1':'red'}
+    #     # sns.scatterplot(ax=axs[j,i], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
+    #     #                 data=df, linewidth=0, s=8).set(title=phase+" UMAP projection, Perplexity: "+str(perplexities[i]))
+    #     # axs[j,i].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+    #     # axs[j,i].get_xaxis().set_visible(False)
+    #     # axs[j,i].get_yaxis().set_visible(False)
+    #     # axs[j,i].get_legend().remove()
+    #     sns.scatterplot(ax=axs[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
+    #                     data=df, linewidth=0, s=8).set(title=phase+" UMAP projection, Perplexity: "+str(perplexities[i]))
+    #     axs[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+    #     axs[j].get_xaxis().set_visible(False)
+    #     axs[j].get_yaxis().set_visible(False)
+    #     axs[j].get_legend().remove()
+    #     #bp()
 else:
     fig, axs = plt.subplots(2,4, figsize=(18,10))
 
@@ -389,54 +462,136 @@ else:
         groups = [A[indices[i]:indices[i+1]] for i in range(len(indices) - 1)]
         return groups
 
-    for i in range(len(perplexities)):
+    #for i in range(len(perplexities)):
+    i=0
+    perplexities[i] = 32 # since only 60 tca samples and can't have perplexity greater than # samples for tsne apparently
+
+    tsne_x = np.concatenate([raw_outputs[group] for group in groups], dtype=np.float32)    
+    
+    tsne = TSNE(n_components=2, verbose=1, random_state=123, perplexity=perplexities[i])
+    #z_transform_all = tsne.fit(tsne_x)
+    #z_val = tsne.fit_transform(tsne_x_val)
+    
+    # df_train = pd.DataFrame()
+    # df_val = pd.DataFrame()
+    df = pd.DataFrame()
+    
+    # df2["y"] = tsne_y
+    # df_train["comp-1"] = z_train[:,0]
+    # df_train["comp-2"] = z_train[:,1]
+    # df_val["comp-1"] = z_val[:,0]
+    # df_val["comp-2"] = z_val[:,1]
+    
+    for j, group in enumerate(groups):
+        # ax = all_plots[j][1][i//2,i%2]
+        #df = df_train if phase == 'ctrl_train' else df_val
+
+        dataset = datasets[group]
+        # janky:
+        if group=="ctrl_train" or group=="ctrl_val":
+            dataset = wsc_ctrl_dataset # necessary since 'Subset' types don't inherit the get_label_from_filename method i defined in the custom class implementation
+
+        tsne_x_group = raw_outputs[group]
+
+        #bp()
+        z_group_embedding = tsne.fit_transform(tsne_x_group)
+
+        df["comp-1"] = z_group_embedding[:,0]
+        df["comp-2"] = z_group_embedding[:,1]
+
+        hues_pid = np.array(raw_labels[group].tolist())
+        # hues_gender = [labeler.get_gender(int(item)) for item in hues_pid]
+        # hues_age = [str(int(labeler.get_age(int(item)))) for item in hues_pid]
+        # hues_pidd = [int(item) for item in hues_pid]
+        # hues_gender = [dataset.get_label_from_filename(item) for item in hues_pid]
+        hues_gender = [str(dataset.get_label_from_filename(item)) for item in hues_pid if item in dataset.data_dict.keys()]
+        
+        # hues_sadbinary = []
+        # for item in hues_pid:
+        #     try:
+        #         hues_sadbinary.append(dataset.get_label_from_filename(item))
+        #     except:
+        #         #hues_sadbinary.append(-1)
+        #         print('problem')
+
+        # hues_sadscore = [dataset.get_happysad_from_filename(item) for item in hues_pid]
+        Palette = {'0':'lightgrey', '1':'red'}
+        #bp()
+        #sns.set_palette("viridis")
+        sns.scatterplot(ax=axs.flatten()[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
+                        data=df, linewidth=0, s=8).set(title=group+" T-SNE, Perplexity: "+str(perplexities[i]))
+        # comp_1_subgroups = split_array(df["comp-1"],hues_pidd)
+        # comp_2_subgroups = split_array(df["comp-2"],hues_pidd)
+        # for k in range(len(comp_1_subgroups)):
+        #     axs[j,i].plot(comp_1_subgroups[k],comp_2_subgroups[k],label=hues_pidd[k])
+        
+        axs.flatten()[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+        axs.flatten()[j].get_xaxis().set_visible(False)
+        axs.flatten()[j].get_yaxis().set_visible(False)
+        axs.flatten()[j].get_legend().remove()
+        #bp()
+        df.drop(df.index, inplace=True) # otherwise df dim mismatch when assigning values to it again
+        
+
+    key_label = "PPXTY_" + str(perplexities[i])
+
+    ### old stuff ###
+    # fig, axs = plt.subplots(2,4, figsize=(18,10))
+
+    # def split_array(A, B):
+    #     groups = []
+    #     indices = [0] + [i + 1 for i in range(len(B) - 1) if B[i] != B[i + 1]] + [len(A)]
+    #     groups = [A[indices[i]:indices[i+1]] for i in range(len(indices) - 1)]
+    #     return groups
+
+    # for i in range(len(perplexities)):
         
         
-        tsne = TSNE(n_components=2, verbose=1, random_state=123, perplexity=perplexities[i])
-        z_train = tsne.fit_transform(tsne_x_train)
-        z_val = tsne.fit_transform(tsne_x_val)
+    #     tsne = TSNE(n_components=2, verbose=1, random_state=123, perplexity=perplexities[i])
+    #     z_train = tsne.fit_transform(tsne_x_train)
+    #     z_val = tsne.fit_transform(tsne_x_val)
         
-        df_train = pd.DataFrame()
-        df_val = pd.DataFrame()
+    #     df_train = pd.DataFrame()
+    #     df_val = pd.DataFrame()
         
-        # df2["y"] = tsne_y
-        df_train["comp-1"] = z_train[:,0]
-        df_train["comp-2"] = z_train[:,1]
-        df_val["comp-1"] = z_val[:,0]
-        df_val["comp-2"] = z_val[:,1]
+    #     # df2["y"] = tsne_y
+    #     df_train["comp-1"] = z_train[:,0]
+    #     df_train["comp-2"] = z_train[:,1]
+    #     df_val["comp-1"] = z_val[:,0]
+    #     df_val["comp-2"] = z_val[:,1]
         
-        for j, phase in enumerate(['ctrl_train','ctrl_val']):
-            # ax = all_plots[j][1][i//2,i%2]
-            df = df_train if phase == 'ctrl_train' else df_val
-            hues_pid = np.array(raw_labels[phase].tolist())
-            # hues_gender = [labeler.get_gender(int(item)) for item in hues_pid]
-            # hues_age = [str(int(labeler.get_age(int(item)))) for item in hues_pid]
-            # hues_pidd = [int(item) for item in hues_pid]
-            # hues_gender = [dataset.get_label_from_filename(item) for item in hues_pid]
+    #     for j, phase in enumerate(['ctrl_train','ctrl_val']):
+    #         # ax = all_plots[j][1][i//2,i%2]
+    #         df = df_train if phase == 'ctrl_train' else df_val
+    #         hues_pid = np.array(raw_labels[phase].tolist())
+    #         # hues_gender = [labeler.get_gender(int(item)) for item in hues_pid]
+    #         # hues_age = [str(int(labeler.get_age(int(item)))) for item in hues_pid]
+    #         # hues_pidd = [int(item) for item in hues_pid]
+    #         # hues_gender = [dataset.get_label_from_filename(item) for item in hues_pid]
             
-            hues_sadbinary = []
-            for item in hues_pid:
-                try:
-                    hues_sadbinary.append(dataset.get_happysad_from_filename(item))
-                except:
-                    hues_sadbinary.append(-1)
-                    print('problem')
+    #         hues_sadbinary = []
+    #         for item in hues_pid:
+    #             try:
+    #                 hues_sadbinary.append(dataset.get_happysad_from_filename(item))
+    #             except:
+    #                 hues_sadbinary.append(-1)
+    #                 print('problem')
 
-            # hues_sadscore = [dataset.get_happysad_from_filename(item) for item in hues_pid]
+    #         # hues_sadscore = [dataset.get_happysad_from_filename(item) for item in hues_pid]
 
-            sns.set_palette("viridis")
-            sns.scatterplot(ax=axs[j,i], x="comp-1", y="comp-2", hue=hues_sadbinary, legend='full',
-                            data=df, linewidth=0, s=8).set(title=phase+" T-SNE projection, Perplexity: "+str(perplexities[i]))
-            # comp_1_subgroups = split_array(df["comp-1"],hues_pidd)
-            # comp_2_subgroups = split_array(df["comp-2"],hues_pidd)
-            # for k in range(len(comp_1_subgroups)):
-            #     axs[j,i].plot(comp_1_subgroups[k],comp_2_subgroups[k],label=hues_pidd[k])
+    #         sns.set_palette("viridis")
+    #         sns.scatterplot(ax=axs[j,i], x="comp-1", y="comp-2", hue=hues_sadbinary, legend='full',
+    #                         data=df, linewidth=0, s=8).set(title=phase+" T-SNE projection, Perplexity: "+str(perplexities[i]))
+    #         # comp_1_subgroups = split_array(df["comp-1"],hues_pidd)
+    #         # comp_2_subgroups = split_array(df["comp-2"],hues_pidd)
+    #         # for k in range(len(comp_1_subgroups)):
+    #         #     axs[j,i].plot(comp_1_subgroups[k],comp_2_subgroups[k],label=hues_pidd[k])
             
-            axs[j,i].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-            axs[j,i].get_xaxis().set_visible(False)
-            axs[j,i].get_yaxis().set_visible(False)
-            axs[j,i].get_legend().remove()
+    #         axs[j,i].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+    #         axs[j,i].get_xaxis().set_visible(False)
+    #         axs[j,i].get_yaxis().set_visible(False)
+    #         axs[j,i].get_legend().remove()
         
 
-        key_label = "PPXTY_" + str(perplexities[i])
-plt.savefig(os.path.join(ROOT_DIR, 'figures', "umap_control_train_wsc.pdf"))
+    #     key_label = "PPXTY_" + str(perplexities[i])
+plt.savefig(os.path.join(ROOT_DIR, 'figures', "umap_allgroups_nmodel_fittrain.pdf"))

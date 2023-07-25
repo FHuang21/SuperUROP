@@ -62,8 +62,20 @@ training_script="trainingLoop.py"
 # CUDA_VISIBLE_DEVICES=1 python $training_script -lr 1e-4 -w 1.0,14.0 --num_classes 2 --dataset shhs2 --label benzo --no_attention &
 
 ## test run to make sure best model saves on each fold
-CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,10.0 --num_classes 2 --dataset wsc --label dep --num_epochs 100 --add_name _best --control
 
+## positive weight ablation w/new simon_model
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,2.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=1 python3 $training_script -lr 4e-4 -w 1.0,4.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=2 python3 $training_script -lr 4e-4 -w 1.0,6.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=3 python3 $training_script -lr 4e-4 -w 1.0,8.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+wait
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,10.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=1 python3 $training_script -lr 4e-4 -w 1.0,12.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=2 python3 $training_script -lr 4e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=3 python3 $training_script -lr 4e-4 -w 1.0,16.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+wait
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,18.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
+CUDA_VISIBLE_DEVICES=1 python3 $training_script -lr 4e-4 -w 1.0,20.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _simonmodelweight2 --control &
 
 wait
 echo "All trainings complete!"

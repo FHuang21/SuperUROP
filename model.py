@@ -547,6 +547,31 @@ class AttentionCondensation(nn.Module):
         attended_output = [torch.matmul(query[i].permute(0, 2, 1), values[i]).permute(0,2,1).squeeze(2) for i in range(self.num_heads)]
         total_output = torch.cat(attended_output, dim=1)
         return total_output
+    
+class SimonModel(nn.Module):
+    def __init__(self, args):
+        super(SimonModel, self).__init__()
+        self.initial_fc_size = args.num_heads * args.hidden_size if args.num_heads > 0 else args.hidden_size
+        self.num_heads = args.num_heads
+        
+        if args.num_heads > 0:
+            self.encoder = AttentionCondensation(768, args.hidden_size, args.num_heads)
+        else:
+            self.encoder = nn.Sequential(nn.Linear(768, self.initial_fc_size), nn.LayerNorm(self.initial_fc_size))
+            
+        
+        
+        self.fc1 = nn.Sequential(nn.Linear(self.initial_fc_size, args.hidden_size), nn.LayerNorm(args.hidden_size))
+        self.fc2 = nn.Sequential(nn.Linear(args.hidden_size, args.fc2_size), nn.LayerNorm(args.fc2_size))
+        self.fc3 = nn.Linear(args.fc2_size, args.num_classes)
+        self.relu = nn.ReLU()
+        self.batch_norm = nn.BatchNorm1d(args.hidden_size)
+        
+    def forward(self, x):
+        if self.num_heads > 0:
+            return self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.encoder(x))))))
+        else:
+            return self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.relu(self.encoder(torch.mean(x,axis=1))))))))
 
 # class AttentionCondensation(nn.Module):
 #     def __init__(self, input_size, hidden_size):

@@ -700,7 +700,11 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         self.data_dict = self.parse_shhs2_antidep()
         self.data_dict_hs = self.parse_shhs2_sf36()
         self.data_dict_b = self.parse_shhs2_benzos()
-        self.all_valid_files = list(self.data_dict_hs.keys() if self.label=="dep" else self.data_dict.keys())
+        # if args.remove_non_antidep: # shouldn't be necessary: when filtering by group i remove guys with n/a on antidepressant info
+        #     for key in self.data_dict_hs.keys():
+        #         if key not in self.data_dict.keys():
+        #             del self.data_dict_hs[key]
+        self.all_valid_files = list(self.data_dict_hs.keys() if (self.label=="dep" or self.label=="nsrrid") else self.data_dict.keys())
 
     def parse_shhs2_antidep(self):
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -738,6 +742,7 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         # good
         if(self.control):
             output = {f"shhs2-{k}.npz": v for k, v, on_tca, on_ntca in zip(df['nsrrid'], df['label'], df['tca2'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and not (on_tca or on_ntca)}
+            #bp()
         elif(self.tca):
             output = {f"shhs2-{k}.npz": v for k, v, on_tca in zip(df['nsrrid'], df['label'], df['tca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and on_tca}
         elif(self.ntca):
@@ -769,7 +774,10 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         #     return 1
         # else:
         #     return 0
-        return self.data_dict_hs[filename]
+        return self.data_dict_hs[filename] #FIXME:::
+
+    # def get_happysadbinary_from_filename(self, filename):
+    #     return self.data_dict_hs[filename]
     
     def threshold_values(self): # hella inefficient
         #th = 4
@@ -815,10 +823,10 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         return df
         
     def __len__(self):
-        if(self.label == "dep"):
+        if(self.label == "dep" or self.label=="nsrrid"): # fix this later, won't work if antidep is label (i think)
             return len(self.data_dict_hs)
         elif(self.label == "antidep"):
-            return len(self.data_dict_hs)
+            return len(self.data_dict)
         elif(self.label == "benzo"):
             return len(self.data_dict_b)
     
@@ -860,10 +868,15 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         self.other = args.other
         self.num_classes = args.num_classes
         self.encoding_path = encoding_path
+        # args.remove_non_antidep
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
         self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
         self.data_dict_hs = self.parse_wsc_zung()
+        # if args.remove_non_antidep: # shouldn't be necessary
+        #     for key in self.data_dict_hs.keys():
+        #         if key not in self.data_dict.keys():
+        #             del self.data_dict_hs[key]
         if(self.label == "dep"):
             self.all_valid_files = list(self.data_dict_hs.keys())
         elif(self.label == "antidep"):
@@ -960,13 +973,13 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         #     return 3
         # else:
         #     return 0
-        return (1 if self.data_dict_hs[filename]>=36 else 0)
+        return (1 if self.data_dict_hs[filename]>=36 else 0) #FIXME::: later
     
     def get_happysad_from_filename(self, filename):
         return self.data_dict_hs[filename]
     
     def get_happysadbinary_from_filename(self, filename):
-        return 1 if self.data_dict_hs[filename]>=40 else 0
+        return 1 if self.data_dict_hs[filename]>=36 else 0
     
     def __len__(self):
         return len(self.data_dict_hs if (self.label=='dep' or self.label=='nsrrid') else self.data_dict)

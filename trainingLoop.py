@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor
+from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor, SimonModel
 from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -106,6 +106,9 @@ parser.add_argument('--tca', action='store_true', default=False)
 parser.add_argument('--ntca', action='store_true', default=False)
 parser.add_argument('--ssri', action='store_true', default=False)
 parser.add_argument('--other', action='store_true', default=False)
+parser.add_argument('--simon_model', action='store_true', default=False)
+parser.add_argument('--hidden_size', type=int, default=8)
+parser.add_argument('--fc2_size', type=int, default=32)
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
 args = parser.parse_args()
 lr = args.lr
@@ -165,7 +168,10 @@ elif (dataset_name == 'mgh'):
     dataset = EEG_MGH_Dataset(args)
 
 # decide which model to use
-if (data_source == 'eeg' and datatype == 'ts'):
+if (args.simon_model):
+    model = SimonModel(args)
+    print("Simon model!")
+elif (data_source == 'eeg' and datatype == 'ts'):
     model = nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
 elif (datatype == 'encoding' and not args.no_attention):
     model = SimpleAttentionPredictor(args).to(device)
@@ -306,12 +312,16 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 
             ## temp changes
             #model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
-            model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_thing_ctrl"
+            model_path = f"/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w{weights[1]}"
 
-            ## remove this after this training and uncomment the stuff after it
+            ## TEMP
             if((epoch+1) % 5 == 0):
                 model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}_epoch{epoch}.pt"
                 model_save_path = os.path.join(model_path, model_name)
+                if not os.path.exists(model_path):
+                    # Create the folder if it does not exist
+                    os.makedirs(model_path)
+                    #print(f"Folder '{model_save_path}' created successfully.")
                 torch.save(n_model.state_dict(), model_save_path)
             # if new_f1 > max_f1:
             #     max_f1 = new_f1
