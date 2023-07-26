@@ -542,6 +542,7 @@ class AttentionCondensation(nn.Module):
         self.num_heads = num_heads
         
     def forward(self, x):
+        bp()
         query = [self.softmax(self.query_layer[i](x)) for i in range(self.num_heads)]
         values = [self.value_layer[i](x) for i in range(self.num_heads)]
         attended_output = [torch.matmul(query[i].permute(0, 2, 1), values[i]).permute(0,2,1).squeeze(2) for i in range(self.num_heads)]

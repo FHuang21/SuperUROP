@@ -3,7 +3,7 @@ here is my readme for training my model and evaluating/visualizing its performan
 TRAIN:
 here is an example batch script to run the SimonModel with some relevant hyperparameters
 
-CUDA_VISIBLE_DEVICES=0 python3 trainingLoop.py -lr 4e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep  --simon_model --control --add_name _bruh
+CUDA_VISIBLE_DEVICES=0 python3 trainingLoop.py -lr 4e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --control --add_name _bruh
 
 TO-DO: change the folder save path to where you want the tensorboard logs to save in your scratch.
 note: the cli arguments all have descriptions if they're relevant to you, so read those for info on them.

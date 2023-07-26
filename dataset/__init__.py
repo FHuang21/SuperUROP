@@ -838,10 +838,10 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         #print(x['br_latent'].shape) # (565, 768) for ex.
         if not self.no_attention:
             feature = x['decoder_eeg_latent'].squeeze(0)
-            if feature.shape[0] >= 120:
-                feature = feature[:120, :]
+            if feature.shape[0] >= 150:
+                feature = feature[:150, :]
             else:
-                feature = np.concatenate((feature, np.zeros((120-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
         else:
             feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
         # print("feature shape: ", feature.shape)
@@ -993,10 +993,10 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         #print(x['br_latent'].shape) # (565, 768) for ex.
         if not self.no_attention:
             feature = x['decoder_eeg_latent'].squeeze(0)
-            if feature.shape[0] >= 120:
-                feature = feature[:120, :]
+            if feature.shape[0] >= 150:
+                feature = feature[:150, :]
             else:
-                feature = np.concatenate((feature, np.zeros((120-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
         else:
             feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
         # print("feature shape: ", feature.shape)

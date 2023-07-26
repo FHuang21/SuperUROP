@@ -45,7 +45,7 @@ state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 
 ## NOTE: CHANGE THE ANTIDEP SUBSET ARGS APPROPRIATELY
-args.no_attention = False; args.label = "dep"; args.tca = False; args.ssri = False; args.other = False; args.control = False
+args.no_attention = False; args.label = "dep"; args.tca = False; args.ssri = False; args.other = False; args.control = True
 
 dataset = EEG_Encoding_WSC_Dataset(args)
 # kfold = KFold(n_splits=5, shuffle=True, random_state=20)
@@ -68,6 +68,8 @@ with torch.no_grad():
         y = y.detach().numpy()
         y_true.append(y)
 percent_pos = num_pos / len(y_pred)
+print("num pos: ", num_pos)
+print("total: ", len(y_pred))
 print("% positive: ", percent_pos)
 
 # Calculate class-wise precision
