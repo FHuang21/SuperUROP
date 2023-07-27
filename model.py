@@ -542,7 +542,7 @@ class AttentionCondensation(nn.Module):
         self.num_heads = num_heads
         
     def forward(self, x):
-        bp()
+        #bp()
         query = [self.softmax(self.query_layer[i](x)) for i in range(self.num_heads)]
         values = [self.value_layer[i](x) for i in range(self.num_heads)]
         attended_output = [torch.matmul(query[i].permute(0, 2, 1), values[i]).permute(0,2,1).squeeze(2) for i in range(self.num_heads)]
@@ -559,11 +559,9 @@ class SimonModel(nn.Module):
             self.encoder = AttentionCondensation(768, args.hidden_size, args.num_heads)
         else:
             self.encoder = nn.Sequential(nn.Linear(768, self.initial_fc_size), nn.LayerNorm(self.initial_fc_size))
-            
         
-        
-        self.fc1 = nn.Sequential(nn.Linear(self.initial_fc_size, args.hidden_size), nn.LayerNorm(args.hidden_size))
-        self.fc2 = nn.Sequential(nn.Linear(args.hidden_size, args.fc2_size), nn.LayerNorm(args.fc2_size))
+        self.fc1 = nn.Sequential(nn.Linear(self.initial_fc_size, args.hidden_size), nn.LayerNorm(args.hidden_size), nn.Dropout(0.5))
+        self.fc2 = nn.Sequential(nn.Linear(args.hidden_size, args.fc2_size), nn.LayerNorm(args.fc2_size), nn.Dropout(0.5))
         self.fc3 = nn.Linear(args.fc2_size, args.num_classes)
         self.relu = nn.ReLU()
         self.batch_norm = nn.BatchNorm1d(args.hidden_size)

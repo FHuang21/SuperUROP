@@ -736,9 +736,8 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
                     + self.threshold_func(df['ql209f'], 4, 'less') + self.threshold_func(df['ql209d'], 5, 'greater') \
                     + self.threshold_func(df['ql209h'], 4, 'greater')
 
-        # df['label'] = df['ql209a'] + df['ql209c'] + df['ql209d'] + df['ql209e'] + df['ql209f'] + df['ql209g'] + df['ql209h'] + df['ql209i']
-        self.th = 5
-        df['label'] = df['label'].apply(lambda x: 1 if x >= self.th else 0) # change later?
+        # self.th = 5
+        # df['label'] = df['label'].apply(lambda x: 1 if x >= self.th else 0) # change later?
         # good
         if(self.control):
             output = {f"shhs2-{k}.npz": v for k, v, on_tca, on_ntca in zip(df['nsrrid'], df['label'], df['tca2'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings and not (on_tca or on_ntca)}
@@ -763,7 +762,7 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         elif(self.label == "nsrrid"):
             return filename
         elif(self.label == "dep"):
-            return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64)
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64) # raw SiDS score
         
     def get_label_from_filename(self, filename):
         # on_tca = self.data_dict[filename][0]
@@ -856,7 +855,7 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
 
         return feature, label
 
-class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
+class EEG_Encoding_WSC_Dataset(Dataset):
     def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/wsc_new/abdominal_c4_m1"):
         self.no_attention = args.no_attention
@@ -868,15 +867,11 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         self.other = args.other
         self.num_classes = args.num_classes
         self.encoding_path = encoding_path
-        # args.remove_non_antidep
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
         self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
         self.data_dict_hs = self.parse_wsc_zung()
-        # if args.remove_non_antidep: # shouldn't be necessary
-        #     for key in self.data_dict_hs.keys():
-        #         if key not in self.data_dict.keys():
-        #             del self.data_dict_hs[key]
+
         if(self.label == "dep"):
             self.all_valid_files = list(self.data_dict_hs.keys())
         elif(self.label == "antidep"):
@@ -892,10 +887,6 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         df = df.dropna()
         output = {f"wsc-visit{vst}-{id}-nsrr.npz": [v1,v2,v3] for id, vst, v1, v2, v3 in zip(df['wsc_id'], df['wsc_vst'], df['depression_med'],df['dep_tca_med'], df['dep_ssri_med']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
         return output
-    
-    # def get_num_on_antidep(self):
-    #     on_antidep_list = [val_tuple for val_tuple in self.data_dict.values() if val_tuple[0] == 1]
-    #     return len(on_antidep_list)
     
     def parse_wsc_zung(self): # label: zung_score (> 40 => depressed)
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -918,7 +909,8 @@ class EEG_Encoding_WSC_Dataset(Dataset): # maybe just pass it args
         if(self.label == "nsrrid"):
             return filename
         elif(self.label == "dep" and self.num_classes == 2):
-            return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64) 
+            # return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64)
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64) # returns raw score, threshold before calculating loss
         elif(self.label == "dep"): # regression w/raw zung score
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
         elif(self.label == "antidep" and self.num_classes == 2):

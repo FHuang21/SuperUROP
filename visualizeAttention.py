@@ -30,10 +30,10 @@ attention_avgs = []
 with torch.no_grad():
     for idx, (X, y) in enumerate(shhs2_dataloader): # can change y to nsrrid to plot along with it
         #bp()
-        features.append(X.squeeze())
+        features.append(X.squeeze().detach().numpy())
         attentions = [model.encoder.softmax(model.encoder.query_layer[i](X)) for i in range(model.num_heads)]
         attention_avg = (attentions[0] + attentions[1] + attentions[2]) / 3
-        attention_avg = attention_avg.squeeze() # FIXME:::
+        attention_avg = attention_avg.squeeze().detach().numpy()
         attention_avgs.append(attention_avg)
 
         # pred = model.encoder(X)#.detach().numpy()
@@ -44,10 +44,10 @@ with torch.no_grad():
         if (idx == 67):
             break
 
-bp()
+#bp()
 
 # Create an 8x8 grid of subplots
-fig, axs = plt.subplots(8, 8, figsize=(12, 12))
+fig, axs = plt.subplots(16, 8, figsize=(12, 12))
 
 # Loop over each subplot and populate it with the two plots
 for i in range(8):

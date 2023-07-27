@@ -243,8 +243,10 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
             y_batch = y_batch.to(device)
 
             y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
-
-            loss = loss_fn(y_pred, y_batch)
+            #bp()
+            # threshold zung score here
+            y_batch_classes = (y_batch >= 36).int()
+            loss = loss_fn(y_pred, y_batch_classes.long())
             running_loss += loss.item()
 
             optimizer.zero_grad()
@@ -271,10 +273,11 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
                 y_batch = y_batch.to(device)
                 y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0]
 
-                loss = loss_fn(y_pred, y_batch)
+                y_batch_classes = (y_batch >= 36).int()
+                loss = loss_fn(y_pred, y_batch_classes.long())
                 running_loss += loss.item()
 
-                metrics.fill_metrics(y_pred, y_batch)
+                metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
             epoch_loss = running_loss / len(test_loader)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
@@ -288,14 +291,14 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
             model_path = f"/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/simonmodelantidep"
 
             # ## TEMP
-            if((epoch+1) % 5 == 0):
-                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}_epoch{epoch}.pt"
-                model_save_path = os.path.join(model_path, model_name)
-                if not os.path.exists(model_path):
-                    # Create the folder if it does not exist
-                    os.makedirs(model_path)
-                    #print(f"Folder '{model_save_path}' created successfully.")
-                torch.save(n_model.state_dict(), model_save_path)
+            # if((epoch+1) % 5 == 0):
+            #     model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}_epoch{epoch}.pt"
+            #     model_save_path = os.path.join(model_path, model_name)
+            #     if not os.path.exists(model_path):
+            #         # Create the folder if it does not exist
+            #         os.makedirs(model_path)
+            #         #print(f"Folder '{model_save_path}' created successfully.")
+            #     torch.save(n_model.state_dict(), model_save_path)
             # if new_f1 > max_f1:
             #     max_f1 = new_f1
             #     if 'model_name' in globals():
