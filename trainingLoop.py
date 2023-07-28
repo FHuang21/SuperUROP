@@ -213,7 +213,8 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
     #n_model = model
 
     exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
-    folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
+    #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
+    folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         print(f"Folder path '{folder_path}' created successfully.")
@@ -237,48 +238,62 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
         running_loss = 0.0
         n_model.train()
 
-        for X_batch, y_batch in tqdm(train_loader):
+        if epoch > 0:
+            for X_batch, y_batch in tqdm(train_loader):
 
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+                #bp()
+                X_batch = X_batch.to(device)
+                y_batch = y_batch.to(device)
 
-            y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
-            #bp()
-            # threshold zung score here
-            y_batch_classes = (y_batch >= 36).int()
-            loss = loss_fn(y_pred, y_batch_classes.long())
-            running_loss += loss.item()
+                y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
+                
+                if args.task=='multiclass' and args.label=='dep':
+                    th = 36 if args.dataset=="wsc" else 5 # 5 for shhs2 SDS
+                    y_batch_classes = (y_batch >= th).int()
+                    loss = loss_fn(y_pred, y_batch_classes.long())
+                elif args.task=='regression': 
+                    #bp()
+                    loss = loss_fn(y_pred.squeeze().float(), y_batch.float())
+                else: # e.g. binary antidep
+                    loss = loss_fn(y_pred, y_batch)
+                running_loss += loss.item()
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                #bp()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            metrics.fill_metrics(y_pred, y_batch)
+                metrics.fill_metrics(y_pred, y_batch)
 
-        epoch_loss = running_loss / len(train_loader)
-        print("epoch_loss: ", epoch_loss)
-        computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
-        logger(writer, computed_metrics, 'train', epoch)
-        metrics.clear_metrics()
+            epoch_loss = running_loss / len(train_loader)
+            print("epoch_loss: ", epoch_loss)
+            computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
+            logger(writer, computed_metrics, 'train', epoch)
+            metrics.clear_metrics()
 
-        scheduler.step()
+            scheduler.step()
 
         n_model.eval()
         with torch.no_grad():
 
             running_loss = 0.0
             for X_batch, y_batch in test_loader:
+                #bp()
 
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
                 y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0]
 
-                y_batch_classes = (y_batch >= 36).int()
-                loss = loss_fn(y_pred, y_batch_classes.long())
+                if args.task=='multiclass':
+                    y_batch_classes = (y_batch >= 36).int()
+                    loss = loss_fn(y_pred, y_batch_classes.long())
+                elif args.task=='regression':
+                    loss = loss_fn(y_pred, y_batch)
                 running_loss += loss.item()
 
                 metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
+            #bp()
             epoch_loss = running_loss / len(test_loader)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'val', epoch)
@@ -288,7 +303,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 
             # ## temp changes
             # #model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
-            model_path = f"/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/simonmodelantidep"
+            #model_path = f"/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/simonmodelantidep"
 
             # ## TEMP
             # if((epoch+1) % 5 == 0):

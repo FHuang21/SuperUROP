@@ -48,36 +48,54 @@ model.load_state_dict(state_dict)
 args.no_attention = False; args.label = "dep"; args.tca = False; args.ssri = False; args.other = False; args.control = True
 
 dataset = EEG_Encoding_WSC_Dataset(args)
-# kfold = KFold(n_splits=5, shuffle=True, random_state=20)
-# train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(dataset)][0]
-# trainset = Subset(dataset, train_ids)
-# valset = Subset(dataset, test_ids)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+kfold = KFold(n_splits=5, shuffle=True, random_state=20)
+train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(dataset)][0]
+trainset = Subset(dataset, train_ids)
+valset = Subset(dataset, test_ids)
+dataloader = DataLoader(valset, batch_size=1, shuffle=False)
 
-y_pred = []
-y_true = []
-#bp()
+# y_pred = []
+# y_true = []
+# #bp()
+# #softmax = nn.Softmax(dim=1)
+# num_pos = 0
+# with torch.no_grad():
+#     for X, y in dataloader:
+#         pred = model(X).detach().numpy()
+#         pred = np.argmax(pred, axis=1)
+#         y_pred.append(pred)
+#         num_pos += (1 if pred==1 else 0)
+#         y = y.detach().numpy()
+#         y_true.append(y)
+# percent_pos = num_pos / len(y_pred)
+# print("num pos: ", num_pos)
+# print("total: ", len(y_pred))
+# print("% positive: ", percent_pos)
+
+# # Calculate class-wise precision
+# precision_classwise = precision_score(y_true, y_pred, average=None)
+
+# # Calculate class-wise recall
+# recall_classwise = recall_score(y_true, y_pred, average=None)
+
+# print("Class-wise Precision:", precision_classwise)
+# print("Class-wise Recall:", recall_classwise)
+
+# y_pred = []
+y_true_pos = []
 #softmax = nn.Softmax(dim=1)
 num_pos = 0
 with torch.no_grad():
     for X, y in dataloader:
-        pred = model(X).detach().numpy()
-        pred = np.argmax(pred, axis=1)
-        y_pred.append(pred)
-        num_pos += (1 if pred==1 else 0)
+        # pred = model(X).detach().numpy()
+        # pred = np.argmax(pred, axis=1)
+        # y_pred.append(pred)
+        #num_pos += (1 if pred==1 else 0)
         y = y.detach().numpy()
-        y_true.append(y)
-percent_pos = num_pos / len(y_pred)
-print("num pos: ", num_pos)
-print("total: ", len(y_pred))
-print("% positive: ", percent_pos)
+        #if y >= 36:
+        y_true_pos.append(y)
 
-# Calculate class-wise precision
-precision_classwise = precision_score(y_true, y_pred, average=None)
-
-# Calculate class-wise recall
-recall_classwise = recall_score(y_true, y_pred, average=None)
-
-print("Class-wise Precision:", precision_classwise)
-print("Class-wise Recall:", recall_classwise)
-
+avg = sum(y_true_pos) / len(y_true_pos)
+print("avg pos dep score in wsc valset is ", avg)
+# percent_pos = num_pos / len(y_pred)
+# print("num pos: ", num_pos)

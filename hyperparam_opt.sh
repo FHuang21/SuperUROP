@@ -84,7 +84,8 @@ training_script="trainingLoop.py"
 #CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 1e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 3 --dataset shhs2 --label antidep --num_epochs 50 --simon_model --add_name simonmodel &
 #CUDA_VISIBLE_DEVICES=1 python3 $training_script -lr 1e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 3 --dataset wsc --label antidep --num_epochs 50 --simon_model --add_name simonmodel &
 
-CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 2e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --add_name _newmetricworks? --control
+#CUDA_VISIBLE_DEVICES=0 python3 $training_script --task regression -lr 1e-4 -w 1.0,14.0 -bs 16 --num_classes 1 --num_heads 4 --dataset shhs2 --label dep --num_epochs 50 --simon_model --add_name _SiDS_regression --control
+CUDA_VISIBLE_DEVICES=0 python3 $training_script -lr 4e-4 -w 1.0,14.0 -bs 16 --num_classes 2 --num_heads 4 --dataset wsc --label dep --num_epochs 50 --simon_model --control --add_name _auroc?
 
 wait
 echo "All trainings complete!"
