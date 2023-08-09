@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor, SimonModel
+from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
 from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -99,7 +99,7 @@ parser.add_argument('--num_heads', type=int, default=3, help="for attention cond
 parser.add_argument('--add_name', type=str, default="", help="adds argument to the experiment name")
 parser.add_argument('--layer_dims', type=str, default="256,64,16", help="for NN predictor") # note to Ali: this doesn't matter for SimonModel
 parser.add_argument('--batch_norms', type=str, default="0,0,0", help="for each layer")
-parser.add_argument('--dropout', type=float, default=0.5, help="for all layers")
+parser.add_argument('--dropout', type=float, default=0.5, help="dropout regularization")
 parser.add_argument('--no_attention', action='store_true', default=False, help="use simple, no attention predictor")
 parser.add_argument('--control', action='store_true', default=False, help="just train on control")
 parser.add_argument('--tca', action='store_true', default=False, help="just train on tca")
@@ -107,6 +107,7 @@ parser.add_argument('--ntca', action='store_true', default=False, help="just tra
 parser.add_argument('--ssri', action='store_true', default=False, help="just train on ssri") # only wsc
 parser.add_argument('--other', action='store_true', default=False, help="just train on other") # only wsc
 parser.add_argument('--simon_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--simon_model_antidep', action='store_true', default=False, help="use simon model w/dropout")
 parser.add_argument('--hidden_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--fc2_size', type=int, default=32, help="for SimonModel")
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
@@ -169,6 +170,9 @@ elif (dataset_name == 'mgh'):
 if (args.simon_model):
     model = SimonModel(args).to(device)
     print("Simon model!")
+elif (args.simon_model_antidep):
+    model = SimonModel_Antidep(args).to(device)
+    print("Simon model w/ dropout") # regular SimonModel has dpt option now so ignore this
 elif (data_source == 'eeg' and datatype == 'ts'):
     model = nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
 elif (datatype == 'encoding' and not args.no_attention):
@@ -212,9 +216,9 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
     n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
     #n_model = model
 
-    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
+    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
-    folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
+    folder_path = os.path.join("/data/scratch/scadavid/projects/data/tensorboard_log", datatype, dataset_name, label, num_class_name)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         print(f"Folder path '{folder_path}' created successfully.")
@@ -234,14 +238,13 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
     metrics = Metrics(args)
 
     max_f1 = -1.0
-    for epoch in tqdm(range(num_epochs)):
+    for epoch in range(num_epochs):
         running_loss = 0.0
         n_model.train()
 
         if epoch > 0:
-            for X_batch, y_batch in tqdm(train_loader):
+            for X_batch, y_batch in train_loader:
 
-                #bp()
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
 
@@ -251,14 +254,13 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
                     th = 36 if args.dataset=="wsc" else 5 # 5 for shhs2 SDS
                     y_batch_classes = (y_batch >= th).int()
                     loss = loss_fn(y_pred, y_batch_classes.long())
-                elif args.task=='regression': 
-                    #bp()
-                    loss = loss_fn(y_pred.squeeze().float(), y_batch.float())
+                elif args.task=='regression':
+                    y_pred = y_pred.squeeze()
+                    loss = loss_fn(y_pred.float(), y_batch.float())
                 else: # e.g. binary antidep
                     loss = loss_fn(y_pred, y_batch)
                 running_loss += loss.item()
 
-                #bp()
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -266,7 +268,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
                 metrics.fill_metrics(y_pred, y_batch)
 
             epoch_loss = running_loss / len(train_loader)
-            print("epoch_loss: ", epoch_loss)
+            #print("epoch_loss: ", epoch_loss)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'train', epoch)
             metrics.clear_metrics()
@@ -284,10 +286,13 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
                 y_batch = y_batch.to(device)
                 y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0]
 
-                if args.task=='multiclass':
-                    y_batch_classes = (y_batch >= 36).int()
+                if args.task=='multiclass' and args.label=='dep':
+                    th = 36 if args.dataset=="wsc" else 5 # 5 for shhs2 SDS
                     loss = loss_fn(y_pred, y_batch_classes.long())
                 elif args.task=='regression':
+                    y_pred = y_pred.squeeze()
+                    loss = loss_fn(y_pred.float(), y_batch.float())
+                else: # e.g. binary antidep
                     loss = loss_fn(y_pred, y_batch)
                 running_loss += loss.item()
 
@@ -299,7 +304,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
             logger(writer, computed_metrics, 'val', epoch)
             metrics.clear_metrics()
 
-            new_f1 = computed_metrics["f1_macro"].item() # shoudl be f1_macro if multiple positive labels, 1_f1 if binary
+            #new_f1 = computed_metrics["f1_macro"].item() # shoudl be f1_macro if multiple positive labels, 1_f1 if binary
 
             # ## temp changes
             # #model_path = os.path.join(data_path, 'models', datatype, dataset_name, data_source, label, num_class_name)
