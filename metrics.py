@@ -3,59 +3,54 @@ import torchmetrics.classification
 import torch
 from ipdb import set_trace as bp
 
-# class AvgDepScore(torchmetrics.Metric):
-#     def __init__(self, num_classes):
-#         super().__init__()
-#         self.num_classes = num_classes
-#         self.pred_label_list = []
-#         self.actual_label_list = []
-
-#     def update(self, raw_predictions, raw_labels): # all raw labels
-#         self.pred_label_list += raw_predictions # append each element to list, not append a list inside the list
-#         self.actual_label_list += raw_labels
-    
-#     def compute(self):
-
-# class AvgDepScore(torchmetrics.Metric): 
-#     def __init__(self, threshold, dist_sync_on_step=False): # FIXME : threshold
-#         super().__init__()
-#         self.add_state("zung_scores", default=[], dist_reduce_fx="cat")
-#         self.threshold = threshold
-
-#     def update(self, raw_predictions: torch.tensor, raw_labels: torch.tensor):
-#         #self.pred_classes = (raw_predictions >= self.threshold).int()
-#         self.zung_scores.extend(raw_predictions)
-
-#     def compute(self):
-#         positive_scores = [zung_score for zung_score in self.zung_scores if zung_score >= self.threshold]
-#         return sum(positive_scores) / len(positive_scores)
-
-#     def reset(self):
-#         self.zung_scores = [] # reset to empty list
+def subtracted_list(list1, list2):
+    subtracted = list()
+    for item1, item2 in zip(list1, list2):
+        item = item1 - item2
+        subtracted.append(item)
+    return subtracted
 
 class AvgDepScore(torchmetrics.Metric): 
-    def __init__(self, threshold, dist_sync_on_step=False): # decide threshold on instantiation
+    def __init__(self, dist_sync_on_step=False): 
         super().__init__()
         self.add_state("zung_scores", default=[], dist_reduce_fx="cat")
-        self.threshold = threshold
 
     def update(self, raw_predictions, raw_labels: torch.tensor):
-        #bp()
         self.pred_classes = torch.argmax(raw_predictions, dim=1)
-        #threshd_labels = (raw_labels >= self.threshold).int()
-
         self.zung_scores.extend(self.pred_classes * raw_labels) # raw labels of those predicted positive
 
     def compute(self):
         #'positive_scores' name is misleading: again, it's the raw zung scores of the patients for whom the model predicted positive, regardless of whether they really are or not
-        positive_scores = [zung_score.item() for zung_score in self.zung_scores if zung_score != 0]# if zung_score.item() >= self.threshold]
+        positive_scores = [zung_score.item() for zung_score in self.zung_scores if zung_score != 0]
         if len(positive_scores) == 0:
-            return 0 # no positive examples were predicted i guess???
+            return 0
         else:
             return sum(positive_scores) / len(positive_scores)
 
     def reset(self):
         self.zung_scores = [] # reset to empty list
+
+class CustomMAE(torchmetrics.Metric):
+    def __init__(self, threshold, dist_sync_on_step=False):
+        super().__init__()
+        self.threshold = threshold
+        self.add_state("preds_above_threshold", default=[], dist_reduce_fx="cat") # note: predictions of the guys with actual labels >=5, regardless of prediction itself
+        self.add_state("labels_above_threshold", default=[], dist_reduce_fx="cat")
+    
+    def update(self, raw_predictions, raw_labels: torch.tensor):
+        idx_above_threshold = [idx for idx, label in enumerate(raw_labels) if label >= self.threshold]
+        self.preds_above_threshold.extend([raw_predictions[idx] for idx in idx_above_threshold])
+        self.labels_above_threshold.extend([raw_labels[idx] for idx in idx_above_threshold])
+        #bp()
+    
+    def compute(self):
+        raw_errors = subtracted_list(self.preds_above_threshold, self.labels_above_threshold)
+        abs_errors = [abs(error) for error in raw_errors]
+        return sum(abs_errors) / len(abs_errors)
+
+    def reset(self):
+        self.preds_above_threshold = []
+        self.labels_above_threshold = []
 
 class Metrics():
     def __init__(self, args):
@@ -71,7 +66,7 @@ class Metrics():
         #     self.num_classes = 2
         self.num_classes = args.num_classes
         if self.args.label == "dep":
-            self.num_classes = 2 # will threshold raw scores to get binary depression classification metrics
+            self.num_classes = 2
             if self.args.dataset == "wsc":
                 self.threshold = 36
             elif self.args.dataset == "shhs2":
@@ -88,10 +83,10 @@ class Metrics():
             
         self.init_metrics()
     
-    def multiclass_prediction(self, predictions, labels):
+    def multiclass_prediction(self, predictions, labels, threshold=0):
         predictions = torch.argmax(predictions,dim=1)
-        labels = (labels >= self.threshold).int()
-        #bp()
+        if self.args.label=="dep":
+            labels = (labels >= threshold).int()
         return predictions, labels
     def regression_prediction(self, predictions, labels):
         threshold = 36.0 # or change to 50...but otherwise v few positive labels
@@ -124,11 +119,11 @@ class Metrics():
 
                 "f1_c": torchmetrics.classification.MulticlassF1Score(num_classes=self.num_classes, average = None).to(self.args.device),
 
-                "auroc": torchmetrics.AUROC(task="multiclass", num_classes=self.num_classes).to(self.args.device),
-
-                "avg_dep_score": AvgDepScore(threshold=self.threshold).to(self.args.device)
+                "auroc": torchmetrics.AUROC(task="multiclass", num_classes=self.num_classes).to(self.args.device)
 
             } 
+            if self.args.label=="dep":
+                classifier_metrics_dict["avg_dep_score"] = AvgDepScore().to(self.args.device)
 
         elif self.args.task == 'regression':
             classifier_metrics_dict = {
@@ -137,8 +132,16 @@ class Metrics():
 
                 #"expvar": torchmetrics.ExplainedVariance().cuda()#.to(self.args.device),
 
-                "r2": torchmetrics.R2Score().to(self.args.device)
+                "r2": torchmetrics.R2Score().to(self.args.device),
+
+                "pearson": torchmetrics.PearsonCorrCoef().to(self.args.device),
+
+                "spearman": torchmetrics.SpearmanCorrCoef().to(self.args.device)
+
             }
+            if self.args.label=="dep" and self.args.dataset=="shhs2":
+                classifier_metrics_dict["5_mae"] = CustomMAE(threshold=5).to(self.args.device)
+                classifier_metrics_dict["7_mae"] = CustomMAE(threshold=7).to(self.args.device)
 
         self.classifier_metrics_dict = classifier_metrics_dict
         
@@ -146,7 +149,12 @@ class Metrics():
         if self.args.task == 'regression':
             self.classifier_metrics_dict["r2"].update(raw_predictions, raw_labels)
             self.classifier_metrics_dict["mae"].update(raw_predictions, raw_labels)
+            self.classifier_metrics_dict["pearson"].update(raw_predictions, raw_labels.float())
+            self.classifier_metrics_dict["spearman"].update(raw_predictions, raw_labels.float())
             #self.classifier_metrics_dict["expvar"].update(raw_predictions, raw_labels)
+            if self.args.label == "dep" and self.args.dataset == "shhs2":
+                self.classifier_metrics_dict["5_mae"].update(raw_predictions, raw_labels)
+                self.classifier_metrics_dict["7_mae"].update(raw_predictions, raw_labels)
         elif self.args.task == 'multiclass':
             #bp()
             predictions, labels = self.multiclass_prediction(raw_predictions, raw_labels)
@@ -204,8 +212,13 @@ class Metrics():
             metrics = {
                 "total_loss": loss,
                 "r2": self.classifier_metrics_dict["r2"].compute(),
-                "mae": self.classifier_metrics_dict["mae"].compute()
+                "mae": self.classifier_metrics_dict["mae"].compute(),
+                "pearson": self.classifier_metrics_dict["pearson"].compute(),
+                "spearman": self.classifier_metrics_dict["spearman"].compute()
             }
+            if self.args.label=="dep" and self.args.dataset=="shhs2":
+                metrics["5_mae"] = self.classifier_metrics_dict["5_mae"].compute()
+                metrics["7_mae"] = self.classifier_metrics_dict["7_mae"].compute()
 
         # self.logger(writer, metrics, phase, epoch)
         return metrics 
@@ -213,3 +226,5 @@ class Metrics():
     def clear_metrics(self):
             for _, val in self.classifier_metrics_dict.items():
                 val.reset()
+
+# include mae above 5 and mae above 7
