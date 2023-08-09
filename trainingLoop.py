@@ -214,7 +214,8 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 
     exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
-    folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
+    # folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
+    folder_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD"
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         print(f"Folder path '{folder_path}' created successfully.")
