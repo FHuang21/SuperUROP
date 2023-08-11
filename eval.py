@@ -108,16 +108,16 @@ with torch.no_grad():
 # antidep_data_dict = dataset.data_dict
 
 # # need to get list of the y_pred/true indices for the guys on and not on antidep
-# on_antidep_ids = []
-# control_ids = []
-# for i, label in enumerate(y_label):
-#     #bp()
-#     if (antidep_data_dict[label][0] == 1): # on antidepressant
-#         on_antidep_ids.append(i)
-#     else:
-#         control_ids.append(i)
-# antidep_preds = [y_pred[i] for i in on_antidep_ids]
-# control_preds = [y_pred[i] for i in control_ids]
+on_antidep_ids = []
+control_ids = []
+for i, label in enumerate(y_label):
+    #bp()
+    if (antidep_data_dict[label][0] == 1): # on antidepressant
+        on_antidep_ids.append(i)
+    else:
+        control_ids.append(i)
+antidep_preds = [y_pred[i] for i in on_antidep_ids]
+control_preds = [y_pred[i] for i in control_ids]
 ##
 
 ### boxplot stuff ###
@@ -130,10 +130,10 @@ with torch.no_grad():
 
 ### cdf stuff ###
 # Calculate the CDFs using numpy
-# data1_sorted = np.sort(control_preds)
-# data2_sorted = np.sort(antidep_preds)
-# cdf1 = np.arange(1, len(data1_sorted) + 1) / len(data1_sorted)
-# cdf2 = np.arange(1, len(data2_sorted) + 1) / len(data2_sorted)
+data1_sorted = np.sort(control_preds)
+data2_sorted = np.sort(antidep_preds)
+cdf1 = np.arange(1, len(data1_sorted) + 1) / len(data1_sorted)
+cdf2 = np.arange(1, len(data2_sorted) + 1) / len(data2_sorted)
 
 # # Create the CDF plot for data1 (blue color)
 # plt.plot(data1_sorted, cdf1, marker='o', linestyle='-', color='blue', label='control')
@@ -149,8 +149,6 @@ with torch.no_grad():
 # # Add legend to distinguish between the two datasets
 # plt.legend()
 #####
-
-# plt.show()
 
 # plt.savefig("/data/scratch/scadavid/projects/data/figures/cdfs_wsc_binary.pdf")
 

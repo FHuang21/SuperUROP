@@ -700,11 +700,11 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         self.num_classes = args.num_classes
         self.all_shhs2_encodings = os.listdir(self.encoding_path)
 
-        if self.label == "antidep" or self.label == "nsrrid": #FIXME: could add second label for nsrrid w/ cli
+        if self.label == "antidep": #FIXME: could add second label for nsrrid w/ cli, or nah
             self.data_dict = self.parse_shhs2_antidep()
         elif self.label == "dep":
             self.data_dict = self.parse_shhs2_sf36()
-        elif self.label == "benzo":
+        elif self.label == "benzo" or self.label == "nsrrid":
             self.data_dict = self.parse_shhs2_benzos()
         elif self.label == "betablocker":
             self.data_dict = self.parse_shhs2_beta_blockers()
@@ -797,20 +797,23 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         else:
             return torch.tensor(self.data_dict[filename], dtype=torch.int64)
         
-    def get_label_from_filename(self, filename):
-        on_tca = self.data_dict[filename][0]
-        on_ntca = self.data_dict[filename][1]
-        # if(on_ntca):
-        #     return 2
-        # elif(on_tca):
-        #     return 1
-        # else:
-        #     return 0
-        return (1 if (on_tca or on_ntca) else 0) #FIXME:::
+    def get_label_from_filename(self, filename): # FIXME
+        # on_tca = self.data_dict[filename][0]
+        # on_ntca = self.data_dict[filename][1]
+        # # if(on_ntca):
+        # #     return 2
+        # # elif(on_tca):
+        # #     return 1
+        # # else:
+        # #     return 0
+        # return (1 if (on_tca or on_ntca) else 0) #FIXME:::
 
-    # def get_happysadbinary_from_filename(self, filename):
-    #     return self.data_dict_hs[filename]
-    
+        ##temp
+        if type(self.data_dict[filename])==list: # antidep
+            return (1 if (self.data_dict[filename][0]==1 or self.data_dict[filename][1]==1) else 0)
+        else:
+            return self.data_dict[filename]
+
     def threshold_values(self): # hella inefficient
         #th = 4
         med_names = ['tca', 'ntca', 'control']
@@ -892,17 +895,29 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
-        self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
-        self.data_dict_hs = self.parse_wsc_zung()
+        if self.label == "antidep" or self.label == "nsrrid":
+            self.data_dict = self.parse_wsc_antidep()
+        elif self.label == "dep":
+            self.data_dict = self.parse_wsc_zung()
+        elif self.label == "betablocker":
+            self.data_dict = self.parse_wsc_beta_blockers()
+        elif self.label == "ace":
+            self.data_dict = self.parse_wsc_ace()
+        elif self.label == "thyroid":
+            self.data_dict = self.parse_wsc_thyroid()
+        self.all_valid_files = list(self.data_dict.keys())
 
-        if(self.label == "dep"):
-            self.all_valid_files = list(self.data_dict_hs.keys())
-        elif(self.label == "antidep"):
-            self.all_valid_files = list(self.data_dict.keys())
-        # elif(self.label == "benzo"):
-        #     self.all_valid_files = list(self.data_dict_benzos.keys())
-        elif(self.label == "nsrrid"):
-            self.all_valid_files = list(self.data_dict.keys())
+        # self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
+        # self.data_dict_hs = self.parse_wsc_zung()
+
+        # if(self.label == "dep"):
+        #     self.all_valid_files = list(self.data_dict_hs.keys())
+        # elif(self.label == "antidep"):
+        #     self.all_valid_files = list(self.data_dict.keys())
+        # # elif(self.label == "benzo"):
+        # #     self.all_valid_files = list(self.data_dict_benzos.keys())
+        # elif(self.label == "nsrrid"):
+        #     self.all_valid_files = list(self.data_dict.keys())
 
     def parse_wsc_antidep(self): # label: depression_med
         df = pd.read_csv(self.file, encoding='mac_roman')
@@ -997,7 +1012,7 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         return df
 
     
-    def get_label_from_filename(self, filename): # antidep label
+    def get_label_from_filename(self, filename): # FIXME
         # on_antidep = self.data_dict[filename][0]
         # on_tca = self.data_dict[filename][1]
         # on_ssri = self.data_dict[filename][2]
@@ -1009,7 +1024,13 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         #     return 3
         # else:
         #     return 0
-        return self.data_dict[filename][0] #FIXME::: later
+        ##return self.data_dict[filename][0] #FIXME::: later
+
+        ##temp
+        if type(self.data_dict[filename])==list: #antidep
+            return (1 if (self.data_dict[filename][0]==1 or self.data_dict[filename][1]==1) else 0)
+        else:
+            return self.data_dict[filename]
     
     def get_happysad_from_filename(self, filename):
         return self.data_dict_hs[filename]
@@ -1018,7 +1039,7 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         return 1 if self.data_dict_hs[filename]>=36 else 0
     
     def __len__(self):
-        return len(self.data_dict_hs if (self.label=='dep') else self.data_dict)
+        return len(self.data_dict)
     
     def __getitem__(self, idx):
         #bp()
