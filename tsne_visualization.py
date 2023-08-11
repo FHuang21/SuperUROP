@@ -154,7 +154,8 @@ datasets['wsc'] = wsc_dataset
 # wsc_groups = ['ctrl_train', 'ctrl_val', 'wsc_tca_val', 'wsc_ssri_val', 'wsc_other_val']
 # shhs2_groups = ['shhs2_ctrl_val', 'shhs2_tca_val', 'shhs2_ntca_val']
 # groups = wsc_groups + shhs2_groups
-groups = ['ctrl_train','ctrl_val','wsc']
+#groups = ['ctrl_train','ctrl_val','wsc'] #FIXME:::
+groups = ['ctrl_train','ctrl_val']
 
 raw_outputs = {}
 raw_labels = {}
@@ -207,9 +208,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ##FIXME::: to best model once it's done training
 #wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/lr_0.0004_w_1.0,10.0_bs_16_f1macro_0.57_256,64,16_bns_0,0,0_heads3_0.5_att_ctrl_fold4.pt"
 #wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
-ali_best_antidep_model_path = "/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/ali_best/lr_0.0002_w_1.0,14.0_bs_16_f1macro_0.72_256,64,16_bns_0,0,0_heads4_0.5_att_alibest_fold0_epoch29.pt"
+#ali_best_antidep_model_path = "/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/ali_best/lr_0.0002_w_1.0,14.0_bs_16_f1macro_0.72_256,64,16_bns_0,0,0_heads4_0.5_att_alibest_fold0_epoch29.pt"
+#tuned_antidep_model_path = model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4tuning_081023/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_atttuning_081023_epochs2_fold0.pt"
+benzo1_model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0003_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0003_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs20_fold0.pt"
+
 model = SimonModel(args).to(device)
-state_dict = torch.load(ali_best_antidep_model_path)
+state_dict = torch.load(benzo1_model_path)
 model.load_state_dict(state_dict)
 model.eval()
 
@@ -378,55 +382,59 @@ if True:
     # df_val["comp-1"] = umap_embeddings_val[:,0]
     # df_val["comp-2"] = umap_embeddings_val[:,1]
 
-    # for j, group in enumerate(groups): #FIXME (don't index groups normally)
-    group = "wsc"
-    dataset = datasets[group]
+    for j, group in enumerate(groups): #FIXME (don't index groups normally)
+        #group = "wsc"
+        dataset = datasets[group]
 
-    if group=="ctrl_train" or group=="ctrl_val":
-        dataset = shhs2_dataset # necessary since 'Subset' types don't inherit the get_label_from_filename method i defined in the custom class implementation
+        if group=="ctrl_train" or group=="ctrl_val":
+            dataset = shhs2_dataset # necessary since 'Subset' types don't inherit the get_label_from_filename method i defined in the custom class implementation
 
-    tsne_x_group = raw_outputs[group]
+        tsne_x_group = raw_outputs[group]
 
-    group_embedding = umap_transform_all.transform(tsne_x_group)
+        group_embedding = umap_transform_all.transform(tsne_x_group)
 
-    df["comp-1"] = group_embedding[:,0]
-    df["comp-2"] = group_embedding[:,1]
-    # bp()
+        df["comp-1"] = group_embedding[:,0]
+        df["comp-2"] = group_embedding[:,1]
+        # bp()
 
-    hues_pid = np.array(raw_labels[group].tolist()) # patient id's
+        hues_pid = np.array(raw_labels[group].tolist()) # patient id's
 
-    hues_gender = []
-    for idx, pid in enumerate(hues_pid):
-        y_pred = pred_classes[group][idx].item()
-        y_true = dataset.get_label_from_filename(pid)
-        if(y_pred == y_true):
-            hues_gender.append("tp/tn")
-        elif(y_pred == 1 and y_true == 0):
-            hues_gender.append("fp")
-        elif(y_pred == 0 and y_true == 1):
-            hues_gender.append("fn")
+        hues_gender = []
+        for idx, pid in enumerate(hues_pid):
+            y_pred = pred_classes[group][idx].item()
+            y_true = dataset.get_label_from_filename(pid)
+            if(y_pred == y_true):
+                hues_gender.append("tp/tn")
+            elif(y_pred == 1 and y_true == 0):
+                hues_gender.append("fp")
+            elif(y_pred == 0 and y_true == 1):
+                hues_gender.append("fn")
+            # if(y_true == 1):
+            #     hues_gender.append("pos")
+            # else:
+            #     hues_gender.append("neg")
 
-    #Palette = {'0':'lightgrey', '1':'red'}
-    Palette = {'tp/tn':'lightgrey', 'fp':'blue', 'fn':'red'}
-    colors = [Palette[category] for category in hues_gender]
+        #Palette = {'pos':'red', 'neg':'lightgrey'}
+        Palette = {'tp/tn':'lightgrey', 'fp':'blue', 'fn':'red'}
+        colors = [Palette[category] for category in hues_gender]
 
-    # now, save comp-1/2, colors, and hues_pid in csv
-    data = {'tsne_x1': group_embedding[:,0],'tsne_x2': group_embedding[:,1], 'colors': colors, 'pids': hues_pid}
-    wsc_umap_df = pd.DataFrame(data)
-    bp()
-    wsc_umap_df.to_csv('/data/scratch/scadavid/projects/data/wsc_umap_df.csv', index=False)
+        # now, save comp-1/2, colors, and hues_pid in csv
+        data = {'tsne_x1': group_embedding[:,0],'tsne_x2': group_embedding[:,1], 'colors': colors, 'pids': hues_pid}
+        wsc_umap_df = pd.DataFrame(data)
+        #bp()
+        wsc_umap_df.to_csv(f'/data/scratch/scadavid/projects/data/benzo1_{group}_umap_df.csv', index=False)
 
-    #main(df["comp-1"], df['comp-2'], colors, hues_pid)
+
 
         # NOTE: UNCOMMENT THIS WHEN DONE W/ INTERACTIVE UMAP
-        # sns.scatterplot(ax=axs.flatten()[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
-        #                 data=df, linewidth=0, s=8).set(title=group+" UMAP, Perplexity: "+str(perplexities[i]))
-        # axs.flatten()[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-        # axs.flatten()[j].get_xaxis().set_visible(False)
-        # axs.flatten()[j].get_yaxis().set_visible(False)
-        # axs.flatten()[j].get_legend().remove()
-        # #bp()
-        # df.drop(df.index, inplace=True) # otherwise df dim mismatch when assigning values to it again
+        sns.scatterplot(ax=axs.flatten()[j], x="comp-1", y="comp-2", hue=hues_gender, palette=Palette, legend='full',
+                        data=df, linewidth=0, s=8).set(title=group+" UMAP, Perplexity: "+str(perplexities[i]))
+        axs.flatten()[j].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+        axs.flatten()[j].get_xaxis().set_visible(False)
+        axs.flatten()[j].get_yaxis().set_visible(False)
+        axs.flatten()[j].get_legend().remove()
+        #bp()
+        df.drop(df.index, inplace=True) # otherwise df dim mismatch when assigning values to it again
     
 else:
     fig, axs = plt.subplots(2,4, figsize=(18,10))
@@ -569,4 +577,4 @@ else:
         
 
     #     key_label = "PPXTY_" + str(perplexities[i])
-plt.savefig(os.path.join(ROOT_DIR, 'figures', "bruh.pdf"))
+plt.savefig(os.path.join(ROOT_DIR, 'figures', "benzo1_umaps.pdf"))
