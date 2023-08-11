@@ -210,7 +210,7 @@ if args.pretrained or args.tuning:
     
     for param in fc_end.parameters():
         param.requires_grad = False
-    model = nn.Sequential(model, fc_end)
+    model = nn.Sequential(model, nn.ReLU(), fc_end)
 
 # gen = torch.Generator()
 # gen.manual_seed(20)
