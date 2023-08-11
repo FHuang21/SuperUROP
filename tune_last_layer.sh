@@ -1,0 +1,4 @@
+CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name tuning_081023 --hidden_size 8 --fc2_size 32 --tuning --dropout 0 &
+CUDA_VISIBLE_DEVICES=1 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name tuning_081023 --hidden_size 8 --fc2_size 32 --tuning --dropout 0 &
+CUDA_VISIBLE_DEVICES=2 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name tuning_081023 --hidden_size 8 --fc2_size 32 --tuning --dropout 0 &
+CUDA_VISIBLE_DEVICES=3 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name tuning_081023 --hidden_size 8 --fc2_size 32 --tuning --dropout 0 &

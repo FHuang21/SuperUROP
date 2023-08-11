@@ -1,0 +1,3 @@
+CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 3e-4 -w 1.0,1.0 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 20 --simon_model --add_name balanced_optimization081023_final --hidden_size 8 --fc2_size 32 --dropout 0.5 &
+CUDA_VISIBLE_DEVICES=1 python trainingLoop.py -lr 4e-4 -w 1.0,1.0 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 20 --simon_model --add_name balanced_optimization081023_final --hidden_size 8 --fc2_size 32 --dropout 0.5 &
+CUDA_VISIBLE_DEVICES=2 python trainingLoop.py -lr 5e-4 -w 1.0,1.0 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 20 --simon_model --add_name balanced_optimization081023_final --hidden_size 8 --fc2_size 32 --dropout 0.5 &

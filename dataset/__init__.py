@@ -789,13 +789,13 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
 
     def get_label(self, filename):
         if(self.label == "antidep" and self.num_classes == 2):
-            return torch.tensor((self.data_dict[filename][0] or self.data_dict[filename][1]), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
+            return torch.tensor((int(self.data_dict[filename][0]) or int(self.data_dict[filename][1])), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
         elif(self.label == "antidep"):
             pass #FIXME:::
         elif(self.label == "nsrrid"):
             return filename
         else:
-            return torch.tensor(self.data_dict[filename], dtype=torch.int64)
+            return torch.tensor(int(self.data_dict[filename]), dtype=torch.int64)
         
     def get_label_from_filename(self, filename):
         on_tca = self.data_dict[filename][0]
