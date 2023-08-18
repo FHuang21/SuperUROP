@@ -21,6 +21,7 @@ from sklearn.model_selection import KFold
 from dataset import *
 import argparse
 from interactive_tsne import main
+import pickle
 parser = argparse.ArgumentParser()
 
 ROOT_DIR = "/data/scratch/scadavid/projects/data"
@@ -80,7 +81,7 @@ args.data_source = 'eeg'
 # args.batch_norms = [False,False,False]
 # args.layer_dims = [256,64,16]; args.num_heads = 4; args.dropout = 0.5
 # args.label = 'nsrrid'
-args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.5
+args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.0
 args.no_attention = False; args.label = "nsrrid"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
 shhs2_dataset = EEG_Encoding_SHHS2_Dataset(args)
 kfold = KFold(n_splits=5, shuffle=True, random_state=20)
@@ -154,8 +155,7 @@ datasets['wsc'] = wsc_dataset
 # wsc_groups = ['ctrl_train', 'ctrl_val', 'wsc_tca_val', 'wsc_ssri_val', 'wsc_other_val']
 # shhs2_groups = ['shhs2_ctrl_val', 'shhs2_tca_val', 'shhs2_ntca_val']
 # groups = wsc_groups + shhs2_groups
-#groups = ['ctrl_train','ctrl_val','wsc'] #FIXME:::
-groups = ['ctrl_train','ctrl_val']
+groups = ['ctrl_train','ctrl_val','wsc'] # remove 'wsc' if benzo
 
 raw_outputs = {}
 raw_labels = {}
@@ -210,10 +210,15 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #wsc_happysadmodel_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
 #ali_best_antidep_model_path = "/data/scratch/scadavid/projects/data/models/encoding/shhs2/eeg/antidep/class_2/ali_best/lr_0.0002_w_1.0,14.0_bs_16_f1macro_0.72_256,64,16_bns_0,0,0_heads4_0.5_att_alibest_fold0_epoch29.pt"
 #tuned_antidep_model_path = model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4tuning_081023/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_atttuning_081023_epochs2_fold0.pt"
-benzo1_model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0003_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0003_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs20_fold0.pt"
+#benzo1_model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0003_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0003_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs20_fold0.pt"
+#best_bce_tuned_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0002_w_1.0,2.5_ds_eeg_bs_16_epochs_3_dpt_0.0_fold0_256,64,16_heads4bce_tuned_final/lr_0.0002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_final_epochs3_fold0.pt"
+bce_tuned_relu_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
 
-model = SimonModel(args).to(device)
-state_dict = torch.load(benzo1_model_path)
+
+model = SimonModel(args)#.to(device)
+fc_end = nn.Linear(2, 1)
+model = nn.Sequential(model, nn.ReLU(), fc_end).to(device)
+state_dict = torch.load(bce_tuned_relu_path)
 model.load_state_dict(state_dict)
 model.eval()
 
@@ -265,11 +270,12 @@ for group in groups:
                 #bp()
                 # eeg_output = model.attention(eeg)
                 # age_output1 = model.fc2(eeg_output) # output is 64 dims
-                age_output1 = model.fc2(model.relu(model.fc1(model.encoder(eeg))))
+                age_output1 = model[0].fc2(model[0].relu(model[0].fc1(model[0].encoder(eeg))))
                 # bp()
                 # features, code, pred_class = model(breathing, stages)
                 raw_outputs[group][i] = age_output1.cpu().numpy().flatten() # projection into lower dimensional space
-                pred_classes[group][i] = torch.argmax(model(eeg), dim=1)
+                #pred_classes[group][i] = torch.argmax(model(eeg), dim=1)
+                pred_classes[group][i] = 1 if model(eeg).item() >= .2 else 0
                 raw_labels[group][i] = labels
                 i += 1
     raw_outputs[group] = raw_outputs[group][:i]
@@ -372,6 +378,13 @@ if True:
     # umap_embeddings_train = umap_model.fit_transform(tsne_x_train)
     # umap_embeddings_val = umap_model.transform(tsne_x_val)
     umap_transform_all = umap_model.fit(tsne_x) # this takes a while...
+
+    with open('/data/scratch/scadavid/projects/data/bce_relu_umap_fit.pkl', 'wb') as file:
+        pickle.dump(umap_transform_all, file)
+
+    bp()
+
+
     # df_train = pd.DataFrame()
     # df_val = pd.DataFrame()
     df = pd.DataFrame()
@@ -401,7 +414,7 @@ if True:
 
         hues_gender = []
         for idx, pid in enumerate(hues_pid):
-            y_pred = pred_classes[group][idx].item()
+            y_pred = pred_classes[group][idx]#.item()
             y_true = dataset.get_label_from_filename(pid)
             if(y_pred == y_true):
                 hues_gender.append("tp/tn")
@@ -422,7 +435,7 @@ if True:
         data = {'tsne_x1': group_embedding[:,0],'tsne_x2': group_embedding[:,1], 'colors': colors, 'pids': hues_pid}
         wsc_umap_df = pd.DataFrame(data)
         #bp()
-        wsc_umap_df.to_csv(f'/data/scratch/scadavid/projects/data/benzo1_{group}_umap_df.csv', index=False)
+        wsc_umap_df.to_csv(f'/data/scratch/scadavid/projects/data/csv/bce_relu_antidep_{group}_umap_check_df.csv', index=False)
 
 
 
@@ -577,4 +590,4 @@ else:
         
 
     #     key_label = "PPXTY_" + str(perplexities[i])
-plt.savefig(os.path.join(ROOT_DIR, 'figures', "benzo1_umaps.pdf"))
+plt.savefig(os.path.join(ROOT_DIR, 'figures', "bce_relu_antidep_umap_check.pdf"))
