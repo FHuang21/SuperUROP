@@ -87,7 +87,7 @@ y_true = []
 # num_pos = 0
 #num_actual_pos = 0
 with torch.no_grad():
-    for X, y in trainloader:
+    for X, y in dataloader:
         #bp()
         pred = model(X).detach().numpy()
         pred = np.argmax(pred, axis=1)

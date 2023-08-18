@@ -218,7 +218,7 @@ for j, pid in enumerate(pids):
     df["comp-2"] = group_embedding[:,1]
 
     Hues = [str(pred) for pred in pred_classes[pid]]
-    Palette = {'0':'red', '1':'blue'}
+    Palette = {'0':'blue', '1':'red'}
 
     # # now, save comp-1/2, colors, and hues_pid in csv
     # data = {'tsne_x1': group_embedding[:,0],'tsne_x2': group_embedding[:,1], 'colors': colors, 'pids': hues_pid}

@@ -52,9 +52,9 @@ model.load_state_dict(state_dict)
 model.eval()
 threshold = 0.2
 
-path = f'/data/scratch/scadavid/projects/data/udall/'
-if not os.path.exists(path):
-    os.makedirs(path)
+path = '/data/scratch/scadavid/projects/data/udall/'
+# if not os.path.exists(path):
+#     os.makedirs(path)
 
 new_files = ['PD_Hao_data_NIHND126MXDGP', 'PD_Hao_data_NIHBE740TFYAH', 'PD_Hao_data_NIHPT334YGJLK', 'PD_Hao_data_NIHDW178UFZHB', 'PD_Hao_data_NIHHD991PGRJC', 'PD_Hao_data_NIHFW795KLATW']
 
