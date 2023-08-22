@@ -72,14 +72,7 @@ class Metrics():
             elif self.args.dataset == "shhs2":
                 self.threshold = 5
             
-        if self.args.target == 'hy':
-            self.transform_pred = self.nearest_hy_score
-        elif self.args.target == 'age':
-            self.transform_pred = self.age_prediction
-        elif self.args.task == 'multiclass':
-            self.transform_pred = self.multiclass_prediction
-        elif self.args.task == 'regression':
-            self.transform_pred = self.regression_prediction
+
             
         self.init_metrics()
     
@@ -124,7 +117,21 @@ class Metrics():
             } 
             if self.args.label=="dep":
                 classifier_metrics_dict["avg_dep_score"] = AvgDepScore().to(self.args.device)
+        elif self.args.task == 'binary':
+            classifier_metrics_dict = {
+                "acc": torchmetrics.Accuracy(task='binary').to(self.args.device),
 
+                "kappa": torchmetrics.CohenKappa(task='binary').to(self.args.device),
+
+                #"prec": torchmetrics.Precision(task = "multiclass",num_classes=self.num_classes, average = None).to(self.args.device),
+
+                #"recall": torchmetrics.Recall(task = "multiclass",num_classes=self.num_classes, average = None).to(self.args.device),
+
+                "f1_macro": torchmetrics.F1Score(task="binary").to(self.args.device),
+
+                "auroc": torchmetrics.AUROC(task="binary").to(self.args.device)
+
+            } 
         elif self.args.task == 'regression':
             classifier_metrics_dict = {
 
@@ -169,7 +176,20 @@ class Metrics():
             if self.args.label == "dep":
                 #could also just feed the following the argmax'd predictions
                 self.classifier_metrics_dict["avg_dep_score"].update(raw_predictions, raw_labels) # needs the raw zung scores to do the calculation
-                        
+        elif self.args.task == 'binary':
+            #bp()
+            labels = raw_labels
+            predictions = (raw_predictions > 0.5).squeeze(1)
+            
+            self.classifier_metrics_dict["acc"].update(predictions, labels)
+            self.classifier_metrics_dict["kappa"].update(predictions, labels)
+            #self.classifier_metrics_dict["prec"].update(predictions, labels)
+            #self.classifier_metrics_dict["recall"].update(predictions, labels)
+            self.classifier_metrics_dict["f1_macro"].update(predictions, labels)
+            #bp()
+            self.classifier_metrics_dict["auroc"].update(raw_predictions, labels) # need raw_preds for threshold, but need the binary labels
+            
+                
     def compute_and_log_metrics(self, loss, hy_loss=0, classwise_prec_recall=True, classwise_f1=True):
         if self.args.task == 'multiclass':
             #prec = self.classifier_metrics_dict["prec"].compute()
@@ -206,7 +226,23 @@ class Metrics():
 
             if self.args.label == "dep":
                 metrics["avg_dep_score"] = self.classifier_metrics_dict["avg_dep_score"].compute()
-
+        elif self.args.task == 'binary':
+            metrics = {
+                
+                "total_loss": loss, 
+                "acc": self.classifier_metrics_dict["acc"].compute(),
+                #"r2": self.classifier_metrics_dict["r2"].compute(),
+                #"mae": self.classifier_metrics_dict["mae"].compute(),
+                # "kappa": self.classifier_metrics_dict["kappa"].compute(),
+                # "neg_precision": neg_prec,
+                # "pos_precision": pos_prec,
+                # "neg_recall": neg_rec,
+                # "pos_recall": pos_rec,
+                "f1_macro": self.classifier_metrics_dict["f1_macro"].compute(),
+                "auroc": self.classifier_metrics_dict["auroc"].compute()
+                
+                }
+            
         elif self.args.task == 'regression':
 
             metrics = {
