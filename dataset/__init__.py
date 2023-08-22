@@ -700,11 +700,11 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         self.num_classes = args.num_classes
         self.all_shhs2_encodings = os.listdir(self.encoding_path)
 
-        if self.label == "antidep": #FIXME: could add second label for nsrrid w/ cli, or nah
+        if self.label == "antidep" or self.label == "nsrrid": #FIXME: could add second label for nsrrid w/ cli, or nah
             self.data_dict = self.parse_shhs2_antidep()
         elif self.label == "dep":
             self.data_dict = self.parse_shhs2_sf36()
-        elif self.label == "benzo" or self.label == "nsrrid":
+        elif self.label == "benzo":
             self.data_dict = self.parse_shhs2_benzos()
         elif self.label == "betablocker":
             self.data_dict = self.parse_shhs2_beta_blockers()
@@ -789,13 +789,13 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
 
     def get_label(self, filename):
         if(self.label == "antidep" and self.num_classes == 2):
-            return torch.tensor((self.data_dict[filename][0] or self.data_dict[filename][1]), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
+            return torch.tensor((int(self.data_dict[filename][0]) or int(self.data_dict[filename][1])), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
         elif(self.label == "antidep"):
             pass #FIXME:::
         elif(self.label == "nsrrid"):
             return filename
         else:
-            return torch.tensor(self.data_dict[filename], dtype=torch.int64)
+            return torch.tensor(int(self.data_dict[filename]), dtype=torch.int64)
         
     def get_label_from_filename(self, filename): # FIXME
         # on_tca = self.data_dict[filename][0]
@@ -885,7 +885,7 @@ class EEG_Encoding_WSC_Dataset(Dataset):
     def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/wsc_new/abdominal_c4_m1"):
         self.no_attention = args.no_attention
-        self.file = file # label file
+        self.file = file # label file ['NIHND126MXDGP', 'NIHBE740TFYAH', 'NIHPT334YGJLK', 'NIHFW795KLATW', 'NIHDW178UFZHB', 'NIHHD991PGRJC']
         self.label = args.label
         self.control = args.control
         self.tca = args.tca
@@ -895,7 +895,7 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
-        if self.label == "antidep" or self.label == "nsrrid":
+        if self.label == "antidep" or self.label == "nsrrid": # FIXME:::
             self.data_dict = self.parse_wsc_antidep()
         elif self.label == "dep":
             self.data_dict = self.parse_wsc_zung()
@@ -1068,7 +1068,240 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         # should return feature and label, both tensors
         return feature, label
     
+class EEG_Encoding_MrOS1_Dataset(Dataset):
+    def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/mros1-dataset-augmented.csv", encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/mros1_new/abdominal_c4_m1"):
+        self.file = file
+        self.encoding_path = encoding_path
+        self.all_mros1_encodings = os.listdir(encoding_path)
+        self.no_attention = args.no_attention
+        
+        if args.label == "benzo":
+            self.data_dict = self.parse_mros1_benzos()
+        else:
+            raise Exception()
+        
+        self.all_valid_files = list(self.data_dict.keys())
+    
+    def parse_mros1_benzos(self):
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['nsrrid', 'm1benzo']]
+        df = df.dropna()
+        #bp()
+        output = {f'mros-visit1-aa{k[2:]}.npz': v for k, v in zip(df['nsrrid'], df['m1benzo']) if f'mros-visit1-aa{k[2:]}.npz' in self.all_mros1_encodings}
+        return output
+    
+    def get_label(self, filename):
+        return torch.tensor(self.data_dict[filename], dtype=torch.int64)
+    
+    def __len__(self):
+        return len(self.data_dict)
 
+    def __getitem__(self, idx):
+        filename = self.all_valid_files[idx]
+        filepath = os.path.join(self.encoding_path, filename)
+        x = np.load(filepath)
+        x = dict(x)
+        if not self.no_attention:
+            feature = x['decoder_eeg_latent'].squeeze(0)
+            if feature.shape[0] >= 150:
+                feature = feature[:150, :]
+            else:
+                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+        else:
+            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
+
+        label = self.get_label(filename)
+        feature = torch.from_numpy(feature)
+
+        # should return feature and label, both tensors
+        return feature, label
+
+class EEG_Encoding_UDALL_Dataset(Dataset): #FIXME
+    def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
+                 encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/udall/abdominal_c4_m1"):
+        self.no_attention = args.no_attention
+        self.file = file # label file ['NIHND126MXDGP', 'NIHBE740TFYAH', 'NIHPT334YGJLK', 'NIHFW795KLATW', 'NIHDW178UFZHB', 'NIHHD991PGRJC']
+        self.label = args.label
+        self.control = args.control
+        self.tca = args.tca
+        self.ssri = args.ssri
+        self.other = args.other
+        self.num_classes = args.num_classes
+        self.encoding_path = encoding_path
+        self.all_wsc_encodings = os.listdir(self.encoding_path)
+
+        if self.label == "antidep" or self.label == "nsrrid": # FIXME:::
+            self.data_dict = self.parse_wsc_antidep()
+        elif self.label == "dep":
+            self.data_dict = self.parse_wsc_zung()
+        elif self.label == "betablocker":
+            self.data_dict = self.parse_wsc_beta_blockers()
+        elif self.label == "ace":
+            self.data_dict = self.parse_wsc_ace()
+        elif self.label == "thyroid":
+            self.data_dict = self.parse_wsc_thyroid()
+        self.all_valid_files = list(self.data_dict.keys())
+
+        # self.data_dict = self.parse_wsc_antidep() #if (label=='antidep' or label=='nsrrid') else self.parse_wsc_zung() # get dictionary of encodings with associated labels
+        # self.data_dict_hs = self.parse_wsc_zung()
+
+        # if(self.label == "dep"):
+        #     self.all_valid_files = list(self.data_dict_hs.keys())
+        # elif(self.label == "antidep"):
+        #     self.all_valid_files = list(self.data_dict.keys())
+        # # elif(self.label == "benzo"):
+        # #     self.all_valid_files = list(self.data_dict_benzos.keys())
+        # elif(self.label == "nsrrid"):
+        #     self.all_valid_files = list(self.data_dict.keys())
+
+    def parse_wsc_antidep(self): # label: depression_med
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['wsc_id', 'wsc_vst', 'depression_med','dep_tca_med','dep_ssri_med']]
+        df = df.dropna()
+        output = {f"wsc-visit{vst}-{id}-nsrr.npz": [v1,v2,v3] for id, vst, v1, v2, v3 in zip(df['wsc_id'], df['wsc_vst'], df['depression_med'],df['dep_tca_med'], df['dep_ssri_med']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        return output
+    
+    def parse_wsc_zung(self): # label: zung_score (> __ => depressed)
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['wsc_id', 'wsc_vst', 'zung_score', 'depression_med','dep_ssri_med', 'dep_tca_med']]
+        df = df.dropna()
+        #df['zung_score'] = df['zung_score'].apply(lambda x: 1 if x >= 40 else 0)
+        if self.control: # hella inefficient
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_antidep in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not on_antidep)}
+        elif self.ssri:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_ssri in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['dep_ssri_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and on_ssri}
+        elif self.tca:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_tca in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['dep_tca_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and on_tca}
+        elif self.other:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v, on_antidep, on_ssri, on_tca in zip(df['wsc_id'], df['wsc_vst'], df['zung_score'], df['depression_med'], df['dep_ssri_med'], df['dep_tca_med']) if (f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings) and (not on_tca) and (not on_ssri) and on_antidep}
+        else:
+            output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['zung_score']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        return output
+    
+    def parse_wsc_beta_blockers(self):
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['wsc_id', 'wsc_vst', 'htn_beta_med']]
+        df =  df.dropna()
+        output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['htn_beta_med']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        return output
+    
+    def parse_wsc_ace(self):
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['wsc_id', 'wsc_vst', 'htn_acei_med']]
+        df =  df.dropna()
+        output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['htn_acei_med']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        return output
+
+    def parse_wsc_thyroid(self):
+        df = pd.read_csv(self.file, encoding='mac_roman')
+        df = df[['wsc_id', 'wsc_vst', 'thyroid_med']]
+        df =  df.dropna()
+        output = {f"wsc-visit{vst}-{id}-nsrr.npz": v for id, vst, v in zip(df['wsc_id'], df['wsc_vst'], df['thyroid_med']) if f"wsc-visit{vst}-{id}-nsrr.npz" in self.all_wsc_encodings}
+        return output
+
+    def get_label(self, filename):
+        if(self.label == "nsrrid"):
+            return filename
+        elif(self.label == "dep" and self.num_classes == 2):
+            # return torch.tensor(1 if self.data_dict_hs[filename]>=36 else 0, dtype=torch.int64)
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64) # returns raw score, threshold before calculating loss
+        elif(self.label == "dep"): # regression w/raw zung score
+            return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
+        elif(self.label == "antidep" and self.num_classes == 2):
+            return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
+        elif(self.label == "antidep"): # can add thing based on args.num_classes
+            #return torch.tensor(self.data_dict[filename][0], dtype=torch.int64) #binary classification
+            if(self.data_dict[filename][2]): #ssri
+                return torch.tensor(2)
+            elif(self.data_dict[filename][1]): #tca
+                return torch.tensor(1)
+            elif(self.data_dict[filename][0]): #other
+                return torch.tensor(3)
+            else:
+                return torch.tensor(0) #control
+
+    def threshold_values(self):
+        th = 36
+        med_names = ['tca', 'ssri', 'other', 'control']
+        data = {'>=th':[0,0,0,0], '<th':[0,0,0,0]}
+        df = pd.DataFrame(data, index=med_names)
+        #bp()
+        # so inefficient, yikes
+        for pid in self.data_dict_hs.keys():
+            if pid in self.data_dict.keys():
+                is_tca = self.data_dict[pid][1]
+                is_ssri = self.data_dict[pid][2]
+                is_other = self.data_dict[pid][0] if not is_tca and not is_ssri else 0
+                is_control = 1 if not (is_tca or is_ssri or is_other) else 0
+                if self.data_dict_hs[pid] >= th:
+                    df.loc['tca','>=th'] += is_tca
+                    df.loc['ssri','>=th'] += is_ssri
+                    df.loc['other','>=th'] += is_other
+                    df.loc['control','>=th'] += is_control
+                else:
+                    df.loc['tca','<th'] += is_tca
+                    df.loc['ssri','<th'] += is_ssri
+                    df.loc['other','<th'] += is_other
+                    df.loc['control','<th'] += is_control
+        
+        return df
+
+    
+    def get_label_from_filename(self, filename): # FIXME
+        # on_antidep = self.data_dict[filename][0]
+        # on_tca = self.data_dict[filename][1]
+        # on_ssri = self.data_dict[filename][2]
+        # if(on_tca):
+        #     return 1
+        # elif(on_ssri):
+        #     return 2
+        # elif(on_antidep):
+        #     return 3
+        # else:
+        #     return 0
+        ##return self.data_dict[filename][0] #FIXME::: later
+
+        ##temp
+        if type(self.data_dict[filename])==list: #antidep
+            return (1 if (self.data_dict[filename][0]==1 or self.data_dict[filename][1]==1) else 0)
+        else:
+            return self.data_dict[filename]
+    
+    def get_happysad_from_filename(self, filename):
+        return self.data_dict_hs[filename]
+    
+    def get_happysadbinary_from_filename(self, filename):
+        return 1 if self.data_dict_hs[filename]>=36 else 0
+    
+    def __len__(self):
+        return len(self.data_dict)
+    
+    def __getitem__(self, idx):
+        #bp()
+        filename = self.all_valid_files[idx]
+        filepath = os.path.join(self.encoding_path, filename)
+        x = np.load(filepath)
+        x = dict(x)
+        #bp()
+        #print(x['br_latent'].shape) # (565, 768) for ex.
+        if not self.no_attention:
+            feature = x['decoder_eeg_latent'].squeeze(0)
+            if feature.shape[0] >= 150:
+                feature = feature[:150, :]
+            else:
+                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+        else:
+            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
+        # print("feature shape: ", feature.shape)
+        # print(type(feature))
+        label = self.get_label(filename)
+        # print("label: ", label)
+        # print(type(label))
+
+        feature = torch.from_numpy(feature)
+
+        # should return feature and label, both tensors
+        return feature, label
 
 # class BR_Encoding_UDALL_Dataset(Dataset):
 #     def __init__(self, patient_id, label='antidep'):

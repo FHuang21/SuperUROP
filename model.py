@@ -549,6 +549,32 @@ class AttentionCondensation(nn.Module):
         total_output = torch.cat(attended_output, dim=1)
         return total_output
 
+class LearnablePositionalEncoding(nn.Module):
+
+    def __init__(self, d_model=1, dropout=0.0, max_len=150):
+        super(LearnablePositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        # Each position gets its own embedding
+        # Since indices are always 0 ... max_len, we don't have to do a look-up
+        self.pe = nn.Parameter(torch.empty(max_len, 1, d_model))  # requires_grad automatically set to True
+        nn.init.uniform_(self.pe, -0.02, 0.02)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+class FixedPositionalEncoding(nn.Module):
+
+    def __init__(self, args):
+        super(FixedPositionalEncoding, self).__init__()
+        self.amplitude = args.PE_amplitude
+
+    def forward(self, x):
+        pe = self.amplitude * torch.cos(2 * torch.pi * torch.arange(0,150) / 300)
+        pe = pe.unsqueeze(1).unsqueeze(0).repeat((x.shape[0],1,768))
+        return x + pe
+
+
 class SimonModel(nn.Module):
     def __init__(self, args):
         super(SimonModel, self).__init__()
@@ -556,21 +582,29 @@ class SimonModel(nn.Module):
         self.num_heads = args.num_heads
         
         if args.num_heads > 0:
-            self.encoder = AttentionCondensation(768, args.hidden_size, args.num_heads)
+            if args.pe_learned:
+                self.encoder = nn.Sequential(LearnablePositionalEncoding(), AttentionCondensation(768, args.hidden_size, args.num_heads))
+            elif args.pe_fixed:
+                self.encoder = nn.Sequential(FixedPositionalEncoding(args), AttentionCondensation(768, args.hidden_size, args.num_heads))
+            else:
+                self.encoder = AttentionCondensation(768, args.hidden_size, args.num_heads)
         else:
             self.encoder = nn.Sequential(nn.Linear(768, self.initial_fc_size), nn.LayerNorm(self.initial_fc_size))
         
-        self.fc1 = nn.Sequential(nn.Linear(self.initial_fc_size, args.hidden_size), nn.LayerNorm(args.hidden_size), nn.Dropout(args.dropout))
-        self.fc2 = nn.Sequential(nn.Linear(args.hidden_size, args.fc2_size), nn.LayerNorm(args.fc2_size), nn.Dropout(args.dropout))
+        self.fc1 = nn.Sequential(nn.Linear(self.initial_fc_size, args.fc1_size), nn.LayerNorm(args.fc1_size), nn.Dropout(args.dropout))
+        self.fc2 = nn.Sequential(nn.Linear(args.fc1_size, args.fc2_size), nn.LayerNorm(args.fc2_size), nn.Dropout(args.dropout))
         self.fc3 = nn.Linear(args.fc2_size, args.num_classes)
+        # if args.task == 'binary':
+        #     self.fc4 = nn.Sequential(nn.ReLU(), nn.Linear(2,1))
+        self.fc4 = nn.Identity()
         self.relu = nn.ReLU()
         self.batch_norm = nn.BatchNorm1d(args.hidden_size)
         
     def forward(self, x):
         if self.num_heads > 0:
-            return self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.encoder(x))))))
+            return self.fc4(self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.encoder(x)))))))
         else:
-            return self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.relu(self.encoder(torch.mean(x,axis=1))))))))
+            return self.fc4(self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.relu(self.encoder(torch.mean(x,axis=1)))))))))
     
 class SimonModel_Antidep(nn.Module):
     def __init__(self, args):

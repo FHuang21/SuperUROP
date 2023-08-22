@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 from model import SimonModel
-from dataset import EEG_Encoding_SHHS2_Dataset, EEG_Encoding_WSC_Dataset
+from dataset import EEG_Encoding_SHHS2_Dataset, EEG_Encoding_WSC_Dataset, EEG_Encoding_MrOS1_Dataset
 from torch.utils.data import DataLoader, Subset
 import torch.nn as nn
 from sklearn.model_selection import KFold
@@ -60,6 +60,7 @@ parser.add_argument('-lr', type=float, default=4e-4, help='learning rate')
 args = parser.parse_args()
 args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.35
 
+## models:
 #model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
 # ^for dep
 # for antidep:
@@ -72,8 +73,10 @@ args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes =
 #model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0003_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0003_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs20_fold0.pt"
 # benzo 2:
 #model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_12_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs12_fold0.pt"
-# bonus model (added layer):
-model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0002_w_1.0,2.5_ds_eeg_bs_16_epochs_3_dpt_0.0_fold0_256,64,16_heads4bce_tuned_final/lr_0.0002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_final_epochs3_fold0.pt"
+# bce tuned model:
+#model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0002_w_1.0,2.5_ds_eeg_bs_16_epochs_3_dpt_0.0_fold0_256,64,16_heads4bce_tuned_final/lr_0.0002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_final_epochs3_fold0.pt"
+# bce tuned relu model:
+model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
 
 model = SimonModel(args)
 # following two for bonus model:
@@ -85,13 +88,13 @@ state_dict = torch.load(model_path)
 # # model_state_dict['2.bias'] = model_state_dict['1']
 # model_state_dict.pop('1.weight')
 # model_state_dict.pop('1.bias')
-model.load_state_dict(model_state_dict)
+model.load_state_dict(state_dict)
 model.eval()
-args.no_attention = False; args.label = "antidep"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
+args.no_attention = False; args.label = "benzo"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
 
 ### wsc stuff ###
-dataset = EEG_Encoding_WSC_Dataset(args)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+# dataset = EEG_Encoding_WSC_Dataset(args)
+# dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 ####
 
 ### shhs2 stuff ###
@@ -104,6 +107,11 @@ dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 # valloader = DataLoader(valset, batch_size=1, shuffle=False)
 ####
 
+### mros1 stuff ###
+dataset = EEG_Encoding_MrOS1_Dataset(args)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+####
+
 y_pred = []
 y_true = []
 #bp()
@@ -113,8 +121,8 @@ with torch.no_grad():
     for X, y in dataloader:
         #bp()
         pred = model(X)#.detach().numpy()
-        #pred = softmax(pred)[0][1]
-        pred = torch.sigmoid(pred)
+        pred = softmax(pred)[0][1]
+        #pred = torch.sigmoid(pred)
         pred = pred.item()
         #pred = np.exp(pred[0][0])/sum(np.exp(pred[0][0]))
         y_pred.append(pred)
@@ -123,6 +131,6 @@ with torch.no_grad():
         y_true.append(y)
 
 fig, ax = plt.subplots()
-plot_auroc(ax, y_true, y_pred)
+plot_auprc(ax, y_true, y_pred) # change to roc or prc
 figure_savepath = "/data/scratch/scadavid/projects/data/figures/roc_prc" 
-plt.savefig(os.path.join(figure_savepath,"bonus_model_ROC_wsc.pdf"))
+plt.savefig(os.path.join(figure_savepath,"benzo1_PRC_mros1.pdf"))

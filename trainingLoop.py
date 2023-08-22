@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
+from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, LearnablePositionalEncoding, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
 from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -16,6 +16,10 @@ from ipdb import set_trace as bp
 import argparse
 import os
 from metrics import Metrics
+
+## CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name bce_tuned_relu_081123_final --hidden_size 8 --fc2_size 32 --tuning --dropout 0 --task binary &
+
+## CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 4e-4 -w 1.0,1.0 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 20 --simon_model --add_name fixed_pe_081423_balanced --hidden_size 8 --fc2_size 32 --tuning --dropout 0.5 --pe_fixed &
 
 torch.manual_seed(20)
 folder_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD"
@@ -75,6 +79,7 @@ def css_to_bool_list(css):
     return bool_list
 
 
+
 parser = argparse.ArgumentParser(description='trainingLoop w/specified hyperparams')
 parser.add_argument('-lr', type=float, default=4e-4, help='learning rate')
 parser.add_argument('-w', type=str, default='1.0,10.0', help='respective class weights (comma-separated)')
@@ -95,7 +100,14 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--label', type=str, default='antidep', help="dep, antidep, or benzo")
 parser.add_argument('--pretrained', action="store_true", default=False)
 parser.add_argument('--tuning', action="store_true", default=False)
+<<<<<<< HEAD
 parser.add_argument('--model_path', type=str, default="exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.5_fold0_256,64,16_heads4balanced_optimization081023_final/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.5_attbalanced_optimization081023_final_epochs20_fold0.pt")
+=======
+parser.add_argument('--pe_fixed', action="store_true", default=False)
+parser.add_argument('--pe_learned', action="store_true", default=False)
+# parser.add_argument('--model_path', type=str, default="exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.5_fold0_256,64,16_heads4balanced_optimization081023_final/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.5_attbalanced_optimization081023_final_epochs20_fold0.pt")
+parser.add_argument('--model_path', type=str, default='exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_12_dpt_0.3_fold0_256,64,16_heads4_fixed_pe_081423_balanced3_PEamp_1.0/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.3_attfixed_pe_081423_balanced3_epochs12_fold0.pt') ##with Positional encoding
+>>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
 parser.add_argument('--num_folds', type=int, default=5, help="for cross-validation")
 parser.add_argument('--num_heads', type=int, default=3, help="for attention condensation")
 parser.add_argument('--add_name', type=str, default="", help="adds argument to the experiment name")
@@ -112,6 +124,8 @@ parser.add_argument('--simon_model', action='store_true', default=False, help="u
 parser.add_argument('--simon_model_antidep', action='store_true', default=False, help="use simon model w/dropout")
 parser.add_argument('--hidden_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--fc2_size', type=int, default=32, help="for SimonModel")
+parser.add_argument('--fc1_size', type=int, default=8, help="for SimonModel")
+parser.add_argument('--PE_amplitude', type=float, default=1, help="for fixed positional encoding")
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
 args = parser.parse_args()
 lr = args.lr
@@ -225,6 +239,10 @@ kfold = KFold(n_splits=args.num_folds, shuffle=True, random_state=20)
 
 # just going to use fold 0
 fold, (train_ids, test_ids) = next(enumerate(kfold.split(dataset)))
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
 # for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 if True:
     print("----FOLD ", fold, "----")
@@ -232,7 +250,11 @@ if True:
     n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
     #n_model = model
 
+<<<<<<< HEAD
     exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
+=======
+    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}"
+>>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
     # folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
     
@@ -272,10 +294,9 @@ if True:
 
         if epoch > 0:
             for X_batch, y_batch in train_loader:
-
+                    
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
-
                 y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0] # Hao's model returns tuple (y_pred, embedding)
                 
                 if args.task=='multiclass' and args.label=='dep':
@@ -312,7 +333,7 @@ if True:
             running_loss = 0.0
             for X_batch, y_batch in test_loader:
                 #bp()
-
+                    
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
                 y_pred = n_model(X_batch) if not is_hao else n_model(X_batch)[0]
@@ -331,7 +352,10 @@ if True:
 
                 metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
+<<<<<<< HEAD
             #bp()
+=======
+>>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
             epoch_loss = running_loss / len(test_loader)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'val', epoch)
@@ -380,4 +404,8 @@ if True:
 
     # model_name = "" # otherwise it overwrites the best model from the previous fold
 
+<<<<<<< HEAD
     writer.close()
+=======
+    writer.close()
+>>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
