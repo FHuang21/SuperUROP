@@ -100,14 +100,10 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--label', type=str, default='antidep', help="dep, antidep, or benzo")
 parser.add_argument('--pretrained', action="store_true", default=False)
 parser.add_argument('--tuning', action="store_true", default=False)
-<<<<<<< HEAD
-parser.add_argument('--model_path', type=str, default="exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.5_fold0_256,64,16_heads4balanced_optimization081023_final/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.5_attbalanced_optimization081023_final_epochs20_fold0.pt")
-=======
 parser.add_argument('--pe_fixed', action="store_true", default=False)
 parser.add_argument('--pe_learned', action="store_true", default=False)
 # parser.add_argument('--model_path', type=str, default="exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.5_fold0_256,64,16_heads4balanced_optimization081023_final/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.5_attbalanced_optimization081023_final_epochs20_fold0.pt")
 parser.add_argument('--model_path', type=str, default='exp_lr_0.0004_w_1.0,1.0_ds_eeg_bs_16_epochs_12_dpt_0.3_fold0_256,64,16_heads4_fixed_pe_081423_balanced3_PEamp_1.0/lr_0.0004_w_1.0,1.0_bs_16_heads4_0.3_attfixed_pe_081423_balanced3_epochs12_fold0.pt') ##with Positional encoding
->>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
 parser.add_argument('--num_folds', type=int, default=5, help="for cross-validation")
 parser.add_argument('--num_heads', type=int, default=3, help="for attention condensation")
 parser.add_argument('--add_name', type=str, default="", help="adds argument to the experiment name")
@@ -239,10 +235,6 @@ kfold = KFold(n_splits=args.num_folds, shuffle=True, random_state=20)
 
 # just going to use fold 0
 fold, (train_ids, test_ids) = next(enumerate(kfold.split(dataset)))
-<<<<<<< HEAD
-=======
-
->>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
 # for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 if True:
     print("----FOLD ", fold, "----")
@@ -250,11 +242,7 @@ if True:
     n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
     #n_model = model
 
-<<<<<<< HEAD
-    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}{add_name}"
-=======
     exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}"
->>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
     # folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
     
@@ -352,10 +340,6 @@ if True:
 
                 metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
-<<<<<<< HEAD
-            #bp()
-=======
->>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
             epoch_loss = running_loss / len(test_loader)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'val', epoch)
@@ -404,8 +388,4 @@ if True:
 
     # model_name = "" # otherwise it overwrites the best model from the previous fold
 
-<<<<<<< HEAD
     writer.close()
-=======
-    writer.close()
->>>>>>> 5d6b056776abe7ab88d7b20b6c068669c1e01076
