@@ -35,12 +35,15 @@ training_script="trainingLoop.py"
 ## best benzo params:
 #CUDA_VISIBLE_DEVICES=0 python3 $training_script --task multiclass -lr 2e-4 -w 1.0,8.0 -bs 16 --num_epochs 20 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label benzo --simon_model --full_set --add_name _fullset
 
-# thyroid
-CUDA_VISIBLE_DEVICES=0 python3 $training_script --task multiclass -lr 1e-4 -w 1.0,10.0 -bs 16 --num_epochs 100 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tune3 &
-CUDA_VISIBLE_DEVICES=1 python3 $training_script --task multiclass -lr 2e-4 -w 1.0,10.0 -bs 16 --num_epochs 100 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tune3 &
-CUDA_VISIBLE_DEVICES=2 python3 $training_script --task multiclass -lr 8e-5 -w 1.0,10.0 -bs 16 --num_epochs 100 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tune3 &
-CUDA_VISIBLE_DEVICES=3 python3 $training_script --task multiclass -lr 6e-5 -w 1.0,10.0 -bs 16 --num_epochs 100 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tune3 &
-# epochs / learning rate
+# thyroid (tune: epochs / learning rate)
+# try to keep epochs at 50 and under, seems to be better for this model. otherwise learning rate is too small initially and model doesn't learn anything
+# ok, 4e-4, 10.0, 30 epochs, bs 16, dropout 0.4 is okay (add_name _tunelrepoch2). try 35 epochs and try 6e-4
+CUDA_VISIBLE_DEVICES=0 python3 $training_script --task multiclass -lr 4e-4 -w 1.0,10.0 -bs 16 --num_epochs 35 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tunelrepoch3 &
+CUDA_VISIBLE_DEVICES=1 python3 $training_script --task multiclass -lr 6e-4 -w 1.0,10.0 -bs 16 --num_epochs 30 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tunelrepoch3 &
+CUDA_VISIBLE_DEVICES=2 python3 $training_script --task multiclass -lr 6e-4 -w 1.0,10.0 -bs 16 --num_epochs 35 --num_classes 2 --num_heads 4 --dropout 0.4 --dataset shhs2 --label thyroid --simon_model --add_name _tunelrepoch3 &
+# ok, 35 epochs is the best so far!
 
 wait
 echo "All trainings complete!"
+
+# note: ali new tuned model is best model for antidepressants

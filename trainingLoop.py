@@ -140,7 +140,7 @@ num_epochs = args.num_epochs
 #num_folds = args.num_folds
 add_name = args.add_name
 pretrained = '_pretrained' if args.pretrained else ''
-model_path = args.model_path
+#model_path = args.model_path
 #with_attention = args.attention
 att = "" if args.no_attention else "_att"
 ctrl = "" if not args.control else "_ctrl"
@@ -229,12 +229,12 @@ if args.pretrained or args.tuning:
 # train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
 # test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False) # don't shuffle cause not training on the test set
 
-#torch.manual_seed(20) # for when torch shuffles the train loader
 
 kfold = KFold(n_splits=args.num_folds, shuffle=True, random_state=20)
 
 # just going to use fold 0
 fold, (train_ids, test_ids) = next(enumerate(kfold.split(dataset)))
+
 # for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 if True:
     print("----FOLD ", fold, "----")
@@ -340,7 +340,6 @@ if True:
 
                 metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
-            #bp()
             epoch_loss = running_loss / len(test_loader)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'val', epoch)

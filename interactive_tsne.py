@@ -6,7 +6,7 @@ import pandas as pd
 from model import SimonModel
 from pathlib import Path
 import os
-from sklearn.decomposition import PCA 
+from sklearn.decomposition import PCA
 
 #local_mnt = '/Users/dina/mnt3/' # FIXME:::::
 #local_mnt = '/data'
@@ -52,6 +52,23 @@ def plot_eeg(tmp, a, uid, name='EEG'):
     a.set_yticks(list(np.arange(0, 32, 4)), list(np.arange(0, 32, 4)))
     a.grid()
 
+def plot_stage(stage, a, uid):
+    #stage = stage[::30]
+    stage = stage.astype(int)
+    idx_invalid = (stage < 0) | (stage > 5)
+    stage_remap = np.array([0, 2, 2, 3, 3, 1] + [np.nan] * 10)
+    stage = stage_remap[stage].astype(float)
+    stage[idx_invalid] = np.nan
+
+    a.plot(np.arange(len(stage)), stage)
+    a.plot(stage)
+    a.set_title('stage')
+    a.set_xlim(0, len(stage))
+    a.set_yticks([0, 1, 2, 3], ['A', 'R', 'L', 'D'])
+    #a.set_xticks(np.arange(0, len(stage), 60), np.arange(0, len(stage), 60) // 2) # ?????
+    #a.set_xticks(np.arange(0, len(stage), 30))
+    a.grid()
+
 def plot_mage(mage, a, uid):
     reduced_data = pca.transform(mage[0])
     reduced_data = reduced_data - kinda_min
@@ -66,32 +83,19 @@ def plot_mage(mage, a, uid):
 
 def plot_attention(attentions, a, uid):
     for j, attention in enumerate(attentions):
-        offset_attention = attention + j # may need to scale down j
+        attention = attention.cpu().detach().numpy()
+        offset_attention = attention + j*0.1 # may need to scale down j
         a.plot(offset_attention)
     
     a.set_xlim(0, attentions[0].shape[0])
     a.axis('off')
     
 
-def plot_stage(stage, a, uid):
-    #stage = stage[::30]
-    stage = stage.astype(int)
-    idx_invalid = (stage < 0) | (stage > 5)
-    stage_remap = np.array([0, 2, 2, 3, 3, 1] + [np.nan] * 10)
-    stage = stage_remap[stage].astype(float)
-    stage[idx_invalid] = np.nan
-
-    a.plot(np.arange(len(stage)), stage)
-    a.set_title('stage')
-    a.set_yticks([0, 1, 2, 3], ['A', 'R', 'L', 'D'])
-    a.set_xticks(np.arange(0, len(stage), 60), np.arange(0, len(stage), 60) // 2)
-    a.grid()
-
-
 def plot_main(ax_eeg, uid, ssim=0):
     import datetime
     aa = datetime.datetime.now()
-    plot_stage(np.load(os.path.join(stage_path, uid))['data'], ax_eeg[0], uid)
+    stage = np.load(os.path.join(stage_path, uid))['data']
+    plot_stage(stage, ax_eeg[0], uid)
     ab = datetime.datetime.now()
     print('Stage loading and plotting: ', ab - aa)
     eeg_spec = np.load(os.path.join(multitaper_path, uid))['data']
@@ -103,12 +107,12 @@ def plot_main(ax_eeg, uid, ssim=0):
     # eeg_error = np.abs(eeg_spec[:, :min_len] - eeg_mage[:, :min_len])
     ac = datetime.datetime.now()
     print('Multitaper loading: ', ac - ab)
-    plot_eeg(eeg_spec, ax_eeg[1], uid, f'{ssim} GT')
+    plot_eeg(eeg_spec, ax_eeg[2], uid, f'{ssim} GT')
     ad = datetime.datetime.now()
     print('EEG plotting: ', ad - ac)
 
     mage_spec = np.load(os.path.join(mage_path, uid))['decoder_eeg_latent']
-    plot_mage(mage_spec, ax_eeg[2], uid)
+    plot_mage(mage_spec, ax_eeg[1], uid)
     # plot_eeg(eeg_mage, ax_eeg[2], uid, 'Mage')
     # plot_eeg(eeg_error, ax_eeg[3], uid, 'Error')
     # eeg_vqgan = np.load(f'./files/c4_m1_vqgan_256/{uid}.npz')['pred']
@@ -117,7 +121,6 @@ def plot_main(ax_eeg, uid, ssim=0):
     mage_spec_T = torch.from_numpy(mage_spec)
     attentions = [(model.encoder.softmax(model.encoder.query_layer[i](mage_spec_T))).squeeze() for i in range(model.num_heads)]
     plot_attention(attentions, ax_eeg[3], uid)
-
 
 
 def on_keypress(event):
@@ -250,6 +253,6 @@ def main(tsne_x1, tsne_x2, tsne_color, tsne_id):
     plt.show()
 
 if __name__ == "__main__":
-    wsc_umap_df = pd.read_csv('/data/scratch/scadavid/projects/data/wsc_umap_df.csv', encoding='mac_roman') #FIXME
+    wsc_umap_df = pd.read_csv('/data/scratch/scadavid/projects/data/new_tuned_wsc_umap_df_2color.csv', encoding='mac_roman') #FIXME
     main(wsc_umap_df['tsne_x1'],wsc_umap_df['tsne_x2'],wsc_umap_df['colors'],wsc_umap_df['pids'])
     #main(np.random.randn(100),np.random.randn(100),np.random.randn(100),os.listdir(os.path.join(local_mnt,multitaper_path))[:100])
