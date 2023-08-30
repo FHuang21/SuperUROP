@@ -58,8 +58,8 @@ def plot_auprc(a, x, y, pos_thr=np.log(3)):
 parser = argparse.ArgumentParser()
 parser.add_argument('-lr', type=float, default=4e-4, help='learning rate')
 args = parser.parse_args()
-args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.35
-
+args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 1; args.dropout = 0.0
+args.pe_learned = False; args.pe_fixed = True; args.PE_amplitude=1; args.fc1_size = 8; args.device = torch.device('cpu')
 ## models:
 #model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
 # ^for dep
@@ -76,7 +76,10 @@ args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes =
 # bce tuned model:
 #model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0002_w_1.0,2.5_ds_eeg_bs_16_epochs_3_dpt_0.0_fold0_256,64,16_heads4bce_tuned_final/lr_0.0002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_final_epochs3_fold0.pt"
 # bce tuned relu model:
-model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
+# model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
+
+# model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/AUTOMATIC_TUNING/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_15_dpt_0.0_fold0_256,64,16_heads4_08-22-23_fixedpe_PHASE2-TUNE3-fc3-fc2_BCE_PEamp_1/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_att08-22-23_fixedpe_PHASE2-TUNE3-fc3-fc2_BCE_epochs15_fold0.pt"
+model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/AUTOMATIC_TUNING/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_15_dpt_0.0_fold0_256,64,16_heads4_08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_PEamp_1/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_att08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_epochs15_fold0.pt"
 
 model = SimonModel(args)
 # following two for bonus model:
@@ -90,11 +93,11 @@ state_dict = torch.load(model_path)
 # model_state_dict.pop('1.bias')
 model.load_state_dict(state_dict)
 model.eval()
-args.no_attention = False; args.label = "benzo"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
+args.no_attention = False; args.label = "antidep"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
 
 ### wsc stuff ###
-# dataset = EEG_Encoding_WSC_Dataset(args)
-# dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+dataset = EEG_Encoding_WSC_Dataset(args)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 ####
 
 ### shhs2 stuff ###
@@ -108,8 +111,8 @@ args.no_attention = False; args.label = "benzo"; args.tca = False; args.ntca = F
 ####
 
 ### mros1 stuff ###
-dataset = EEG_Encoding_MrOS1_Dataset(args)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+# dataset = EEG_Encoding_MrOS1_Dataset(args)
+# dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 ####
 
 y_pred = []
@@ -121,8 +124,9 @@ with torch.no_grad():
     for X, y in dataloader:
         #bp()
         pred = model(X)#.detach().numpy()
-        pred = softmax(pred)[0][1]
-        #pred = torch.sigmoid(pred)
+        
+        # pred = softmax(pred)[0][1]
+        pred = torch.sigmoid(pred)
         pred = pred.item()
         #pred = np.exp(pred[0][0])/sum(np.exp(pred[0][0]))
         y_pred.append(pred)
@@ -131,6 +135,6 @@ with torch.no_grad():
         y_true.append(y)
 
 fig, ax = plt.subplots()
-plot_auprc(ax, y_true, y_pred) # change to roc or prc
-figure_savepath = "/data/scratch/scadavid/projects/data/figures/roc_prc" 
-plt.savefig(os.path.join(figure_savepath,"benzo1_PRC_mros1.pdf"))
+plot_auroc(ax, y_true, y_pred) # change to roc or prc
+figure_savepath = "/data/scratch/alimirz/2023/SIMON/FIGURES/" 
+plt.savefig(os.path.join(figure_savepath,"TUNE2_antidep_auroc_wsc.pdf"))

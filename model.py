@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from ipdb import set_trace as bp
-from dataset import EEG_SHHS_Dataset
+from BrEEG.task_spec import ResidualBlock1D
+from dataset import EEG_Encoding_SHHS2_Dataset, EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
 from model_others.Flowformer import FlowformerClassiregressor
-
+import argparse
 def get_rnn(Scale,
             Capacity,
             rnn,
@@ -568,11 +569,12 @@ class FixedPositionalEncoding(nn.Module):
     def __init__(self, args):
         super(FixedPositionalEncoding, self).__init__()
         self.amplitude = args.PE_amplitude
+        self.args = args
 
     def forward(self, x):
         pe = self.amplitude * torch.cos(2 * torch.pi * torch.arange(0,150) / 300)
         pe = pe.unsqueeze(1).unsqueeze(0).repeat((x.shape[0],1,768))
-        return x + pe
+        return x + pe.to(self.args.device)
 
 
 class SimonModel(nn.Module):
@@ -605,6 +607,117 @@ class SimonModel(nn.Module):
             return self.fc4(self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.encoder(x)))))))
         else:
             return self.fc4(self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.relu(self.encoder(torch.mean(x,axis=1)))))))))
+class ConvModel_Antidep(nn.Module):
+    def __init__(self, args):
+        super(ConvModel_Antidep, self).__init__()
+        self.conv1 = nn.Conv1d(768, 768, args.kernel_size, stride=args.stride, padding=2)
+        self.conv2 = nn.Conv1d(768, 768, args.kernel_size, stride=args.stride, padding=2)
+        self.conv3 = nn.Conv1d(768, 768, args.kernel_size, stride=args.stride, padding=2)
+        self.relu = nn.ReLU()
+        self.batch_norm = nn.BatchNorm1d(768)
+        self.pool = nn.AvgPool1d(kernel_size=3)
+        
+        self.fc1 = nn.Identity() #nn.Sequential(nn.Linear(768, 768), nn.LayerNorm(768))
+        self.fc2 = nn.Sequential(nn.Linear(768, 128), nn.LayerNorm(128))
+        self.fc3 = nn.Linear(128, args.num_classes)
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        conv1= self.conv1(x.transpose(1,2))
+        conv2= self.conv2(self.relu(conv1))
+        conv3= self.conv2(self.relu(conv2))
+        encoder_output = self.pool(self.relu(conv3)).transpose(1,2)
+        return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output))))).squeeze(1)
+
+
+
+class BottleNeckModel_Antidep(nn.Module):
+    def __init__(self, args):
+        super(BottleNeckModel_Antidep, self).__init__()
+        Scale = 0.5
+        # in_channels, out_channels, stride, kernel_size, Scale
+        attn_dropout = 0.0 if args.tuning else 0.10
+        self.attn = nn.MultiheadAttention(768, args.num_heads, dropout=attn_dropout)
+        # self.attn2 = nn.MultiheadAttention(768, args.num_heads, dropout=0.1)
+        self.block1 = BottleNeck1d(768, 256, args.stride, args.kernel_size, Scale) 
+        self.block2 = BottleNeck1d(256, 128, args.stride, args.kernel_size, Scale) 
+        # self.block3 = BottleNeck1d(256, 128, args.stride, args.kernel_size, Scale) 
+        self.block3=nn.Identity()
+        self.relu = nn.ReLU()
+        self.norm = nn.LayerNorm(768)
+        # self.batch_norm = nn.BatchNorm1d(768)
+        # self.pool = nn.AvgPool1d(kernel_size=3)
+        
+        self.fc1 = nn.Sequential(nn.Linear(150*128, 1024), nn.LayerNorm(1024), nn.Dropout(args.dropout))
+        self.fc2 = nn.Sequential(nn.Linear(1024, 256), nn.LayerNorm(256), nn.Dropout(args.dropout))
+        self.fc3 = nn.Linear(256, args.num_classes)
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        x,_ = self.attn(x,x,x)
+        # x = self.norm(x)
+        # x,_ = self.attn2(x,x,x)
+        # x = x+y
+        x = self.norm(x)
+        conv1= self.block1(x.transpose(1,2))
+        conv2= self.block2(conv1)
+        conv3 = conv2.view(x.shape[0],-1)
+        # bp()
+        # conv3= self.block3(conv2)
+        
+        encoder_output = conv3
+        return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output)))))
+    
+class Resnet1DModel_Antidep(nn.Module):
+    def __init__(self, args):
+        super(Resnet1DModel_Antidep, self).__init__()
+        # in_channels, out_channels, stride, kernel_size, Scale
+        # self.block1 = ResidualBlock1D(768, 768) 
+        # self.block2 = ResidualBlock1D(768, 768, args.stride) 
+        # self.block3 = ResidualBlock1D(768, 768, args.stride) 
+        # self.batch_norm = nn.BatchNorm1d(768)
+        self.pool = nn.AvgPool1d(kernel_size=3)
+        
+        # self.fc1 = nn.Sequential(nn.Linear(768, 768), nn.LayerNorm(768))
+        # self.fc2 = nn.Sequential(nn.Linear(768, 128), nn.LayerNorm(128))
+        # self.fc3 = nn.Linear(128, args.num_classes)
+        # self.relu = nn.ReLU()
+        self.inplanes = 768
+        self.layer0 = self._make_layer(ResidualBlock1D, 768, 1, stride=args.stride)
+        self.layer1 = self._make_layer(ResidualBlock1D, 768, 1, stride=args.stride)
+        self.layer2 = self._make_layer(ResidualBlock1D, 768, 1, stride=args.stride)
+        self.fc = nn.Conv1d(768, args.num_classes, kernel_size=1)
+
+    # def forward(self, x):
+    #     bp()
+    #     conv1= self.block1(x.transpose(1,2))
+    #     conv2= self.block2(conv1)
+    #     conv3= self.block3(conv2)
+    #     encoder_output = self.pool(conv3).transpose(1,2)
+    #     return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output))))).squeeze(1)
+
+    def _make_layer(self, block, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes:
+            downsample = nn.Sequential(
+                nn.Conv1d(self.inplanes, planes, kernel_size=1, stride=stride),
+                nn.BatchNorm1d(planes),
+            )
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample))
+        self.inplanes = planes
+        for i in range(1, blocks):
+            layers.append(block(self.inplanes, planes))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.layer0(x.transpose(1,2))
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.pool(x)
+        x = self.fc(x)
+        return x.squeeze(1)
+
+    
     
 class SimonModel_Antidep(nn.Module):
     def __init__(self, args):
@@ -663,17 +776,27 @@ class SimonModel_Antidep(nn.Module):
 #         return pred
 
 if __name__ == '__main__':
-    dataset = EEG_SHHS_Dataset()
+    parser = argparse.ArgumentParser(description='trainingLoop w/specified hyperparams')
+    args = parser.parse_args()
+    args.kernel_size = 5; args.num_classes=1
+    args.stride = 4
+    args.no_attention = False; args.label = "nsrrid"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
+    args.device = torch.device('cpu')
+    args.hidden_size=64; args.num_heads = 1
+    
+    dataset = EEG_Encoding_SHHS2_Dataset(args)
     
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
     
-    eeg_encoder = EEG_Encoder().cuda()
-    pd_encoder = BranchVarEncoder().cuda()
-    pd_predictor = BranchVarPredictor().cuda()
-    
-    model = nn.Sequential(eeg_encoder, pd_encoder, pd_predictor)
+    # eeg_encoder = EEG_Encoder().cuda()
+    # pd_encoder = BranchVarEncoder().cuda()
+    # pd_predictor = BranchVarPredictor().cuda()
 
-    model = nn.DataParallel(model)
+
+    model = BottleNeckModel_Antidep(args).cuda()
+    # model = nn.Sequential(eeg_encoder, pd_encoder, pd_predictor)
+
+    # model = nn.DataParallel(model)
     
     aa = iter(dataloader)
     
@@ -690,3 +813,4 @@ if __name__ == '__main__':
     # output = pd_predictor(pd_encode_output)
     
     bp()
+    print('done')

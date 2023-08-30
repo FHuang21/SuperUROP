@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, LearnablePositionalEncoding, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
+from model import BottleNeckModel_Antidep, ConvModel_Antidep, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, LearnablePositionalEncoding, Resnet1DModel_Antidep, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
 from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -16,13 +16,15 @@ from ipdb import set_trace as bp
 import argparse
 import os
 from metrics import Metrics
+import numpy as np 
 
 ## CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 2e-3 -w 1.0,2.5 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 2 --simon_model --add_name bce_tuned_relu_081123_final --hidden_size 8 --fc2_size 32 --tuning --dropout 0 --task binary &
 
 ## CUDA_VISIBLE_DEVICES=0 python trainingLoop.py -lr 4e-4 -w 1.0,1.0 -bs 16 --num_classes 2 --num_heads 4 --dataset shhs2 --label antidep --num_epochs 20 --simon_model --add_name fixed_pe_081423_balanced --hidden_size 8 --fc2_size 32 --tuning --dropout 0.5 --pe_fixed &
 
 torch.manual_seed(20)
-folder_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD"
+np.random.seed(20)
+folder_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/CONV_MODEL/"
 
 def perf_measure(y_actual, y_hat):
     TP = 0
@@ -116,12 +118,20 @@ parser.add_argument('--tca', action='store_true', default=False, help="just trai
 parser.add_argument('--ntca', action='store_true', default=False, help="just train on ntca") # only shhs2
 parser.add_argument('--ssri', action='store_true', default=False, help="just train on ssri") # only wsc
 parser.add_argument('--other', action='store_true', default=False, help="just train on other") # only wsc
+parser.add_argument('--conv_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--bottleneck_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--resnet_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--simon_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--simon_model_antidep', action='store_true', default=False, help="use simon model w/dropout")
 parser.add_argument('--hidden_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--fc2_size', type=int, default=32, help="for SimonModel")
 parser.add_argument('--fc1_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--PE_amplitude', type=float, default=1, help="for fixed positional encoding")
+
+## for conv model
+parser.add_argument('--kernel_size', type=int, default=5, help="for ConvModel")
+parser.add_argument('--stride', type=int, default=4, help="for ConvModel")
+
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
 args = parser.parse_args()
 lr = args.lr
@@ -151,7 +161,7 @@ args.batch_norms = css_to_bool_list(args.batch_norms)
 dpt = args.dropout
 dpt_str = f"_{dpt}"
 print("Label: ", label)
-
+which_model = "simonmodel" if args.simon_model else "convmodel" if args.conv_model else "bottleneckmodel" if args.bottleneck_model else "resnetmodel" if args.resnet_model else "othermodel"
 #data_path = '/data/scratch/scadavid/projects/data'
 
 #available_devices = range(0, torch.cuda.device_count())
@@ -185,6 +195,17 @@ if (args.simon_model):
 elif (args.simon_model_antidep):
     model = SimonModel_Antidep(args).to(device)
     print("Simon model w/ dropout") # regular SimonModel has dpt option now so ignore this
+
+elif (args.conv_model):
+    model = ConvModel_Antidep(args).to(device)
+    print('Conv Model')
+elif (args.bottleneck_model):
+    model = BottleNeckModel_Antidep(args).to(device)
+    print('Bottleneck Model')
+elif (args.resnet_model):
+    model = Resnet1DModel_Antidep(args).to(device)
+    print('resnet1d model ')
+
 elif (data_source == 'eeg' and datatype == 'ts'):
     model = nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
 elif (datatype == 'encoding' and not args.no_attention):
@@ -212,15 +233,23 @@ else: # DeepClassifier can be used for both EEG and BR spectrograms
 if args.pretrained or args.tuning:
     model_path = os.path.join(folder_path, args.model_path)
     state_dict = torch.load(model_path)
-    model.load_state_dict(state_dict)
-    fc_end = nn.Linear(2,1)
+    # del state_dict['fc3.weight']
+    # del state_dict['fc3.bias']
+    model.load_state_dict(state_dict, strict=False)
+    # fc_end = nn.Linear(2,1)
     
-    for param in model.parameters():
-        param.requires_grad = True
+    # for param in model.parameters():
+        # param.requires_grad = True
+    for name, param in model.named_parameters():
+        print(name)
+        if 'fc3' not in name: # and 'fc2' not in name:
+            param.requires_grad = False
+        else:
+            param.requires_grad = True 
     
-    for param in fc_end.parameters():
-        param.requires_grad = False
-    model = nn.Sequential(model, nn.ReLU(), fc_end)
+    # for param in fc_end.parameters():
+    #     param.requires_grad = False
+    # model = nn.Sequential(model, nn.ReLU(), fc_end)
 
 # gen = torch.Generator()
 # gen.manual_seed(20)
@@ -235,14 +264,16 @@ kfold = KFold(n_splits=args.num_folds, shuffle=True, random_state=20)
 
 # just going to use fold 0
 fold, (train_ids, test_ids) = next(enumerate(kfold.split(dataset)))
+print(np.mean(train_ids))
 # for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
 if True:
     print("----FOLD ", fold, "----")
+    val_losses = []
 
     n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
     #n_model = model
 
-    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}"
+    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}_Model_{which_model}_kernelsize_{args.kernel_size}"
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
     # folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
     
@@ -259,17 +290,20 @@ if True:
 
     if args.tuning:
         class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
-        # loss_fn = nn.CrossEntropyLoss(weight=class_weights) if task=='multiclass' else nn.MSELoss()
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(weights[1]).to(device))
+        if task == 'multiclass':
+            loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+        else:
+            print('Positive Weight: ', weights[1])
+            loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(weights[1]).to(device))
     else:
         if task == 'multiclass':
-            loss_fn = nn.CrossEntropyLoss() 
+            loss_fn = nn.CrossEntropyLoss() if weights[1] == 1 else nn.CrossEntropyLoss(weight=torch.tensor(weights, dtype=torch.float32).to(device))
         elif task=='binary':
             loss_fn = nn.BCEWithLogitsLoss()
         else:
             loss_fn = nn.MSELoss()
     
-    optimizer = optim.Adam(n_model.parameters(), lr=lr)
+    optimizer = optim.Adam(n_model.parameters(), lr=lr, weight_decay=1e-4)
     if not args.tuning:
         scheduler = lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
 
@@ -341,6 +375,7 @@ if True:
                 metrics.fill_metrics(y_pred, y_batch) # feed the raw scores, not thresh'd
 
             epoch_loss = running_loss / len(test_loader)
+            val_losses.append(epoch_loss)
             computed_metrics = metrics.compute_and_log_metrics(epoch_loss)
             logger(writer, computed_metrics, 'val', epoch)
             metrics.clear_metrics()
@@ -353,8 +388,10 @@ if True:
             model_path = exp_event_path
 
             ## save final model:
-            if (epoch==(num_epochs-1)):
-                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_epochs{num_epochs}_fold{fold}.pt"
+            # if (epoch==(num_epochs-1)):
+            if epoch_loss == np.min(val_losses):
+                print('saving at epoch: ', epoch)
+                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_epochs{num_epochs}_fold{fold}_best.pt"
                 model_save_path = os.path.join(model_path, model_name)
                 if not os.path.exists(model_path):
                     # Create the folder if it does not exist

@@ -39,34 +39,39 @@ udall_filenames = os.listdir(encoding_path)
 pids = [filename.split('data_')[1] for filename in udall_filenames]
 
 # best antidep model (currently)
-model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
+# model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
+model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/AUTOMATIC_TUNING/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_15_dpt_0.0_fold0_256,64,16_heads4_08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_PEamp_1/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_att08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_epochs15_fold0.pt"
 
-args.label = "antidep"; args.num_classes = 2
-args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.0 # do these even matter?
+
+args.label = "antidep"; args.num_classes = 1
+args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.dropout = 0.0 # do these even matter?
+args.pe_learned = False; args.pe_fixed = True; args.PE_amplitude=1; args.fc1_size = 8; args.device = torch.device('cpu')
+
 #args.no_attention = False; args.label = "antidep"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
 model = SimonModel(args)
-fc_end = nn.Linear(2,1)
-model = nn.Sequential(model, nn.ReLU(), fc_end)
+# fc_end = nn.Linear(2,1)
+# model = nn.Sequential(model, nn.ReLU(), fc_end)
 state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 model.eval()
 threshold = 0.2
 
-path = '/data/scratch/scadavid/projects/data/udall/'
+# path = '/data/scratch/scadavid/projects/data/udall/'
+path = '/data/scratch/alimirz/2023/SIMON/udall/'
 # if not os.path.exists(path):
 #     os.makedirs(path)
 
-new_files = ['PD_Hao_data_NIHND126MXDGP', 'PD_Hao_data_NIHBE740TFYAH', 'PD_Hao_data_NIHPT334YGJLK', 'PD_Hao_data_NIHDW178UFZHB', 'PD_Hao_data_NIHHD991PGRJC', 'PD_Hao_data_NIHFW795KLATW']
+# new_files = ['PD_Hao_data_NIHND126MXDGP', 'PD_Hao_data_NIHBE740TFYAH', 'PD_Hao_data_NIHPT334YGJLK', 'PD_Hao_data_NIHDW178UFZHB', 'PD_Hao_data_NIHHD991PGRJC', 'PD_Hao_data_NIHFW795KLATW']
 
-#for filename in udall_filenames:
-for filename in new_files: # filenames are really folder names
+for filename in udall_filenames:
+# for filename in new_files: # filenames are really folder names
     night_dir = os.path.join(encoding_path, filename)
     ordered_night_files = get_ordered_nights_list(night_dir)
     
     # for night_file in ordered_night_files:
     #     prob = get_predicted_prob(model, night_file)
     probs = [get_predicted_prob(model, os.path.join(encoding_path, filename, night_file)) for night_file in ordered_night_files]
-    binary_preds = [1 if get_predicted_prob(model, os.path.join(encoding_path, filename, night_file))>=.2 else 0 for night_file in ordered_night_files]
+    binary_preds = [1 if get_predicted_prob(model, os.path.join(encoding_path, filename, night_file))>=.05 else 0 for night_file in ordered_night_files]
 
     patient_dict = {'night': ordered_night_files, 'prob': probs, 'preds': binary_preds}
     current_df = pd.DataFrame(patient_dict)

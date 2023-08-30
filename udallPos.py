@@ -2,7 +2,7 @@ import pandas as pd
 import os
 from ipdb import set_trace as bp
 
-my_root = '/data/scratch/scadavid/projects/data/udall'
+my_root = '/data/scratch/alimirz/2023/SIMON/udall/'
 
 patient_csv_files = os.listdir(my_root)
 

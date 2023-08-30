@@ -7,7 +7,7 @@ from ipdb import set_trace as bp
 def get_average_prob(df):
     return sum(df['prob']) / len(df['prob'])
 
-my_udall_root = '/data/scratch/scadavid/projects/data/udall'
+my_udall_root = '/data/scratch/alimirz/2023/SIMON/udall/'
 
 antidep_dict = {'NIHBL760KMGXL': 'escitalopram, trazodone',
 'NIHNT823CHAC3': 'escitalopram',
@@ -52,8 +52,10 @@ patient_csvs = [csv for csv in os.listdir(my_udall_root) if csv.endswith('.csv')
 for j, csv_name in enumerate(patient_csvs):
     # if j==1: # NOTE: temp
     #     break
-
-    pid = csv_name.split('.')[0].split('data_')[1]
+    try:
+        pid = csv_name.split('.')[0].split('data_')[1]
+    except:
+        continue
     try:
         meds = antidep_dict[pid]
     except:
@@ -77,5 +79,5 @@ for j, csv_name in enumerate(patient_csvs):
     plt.axhline(y=0.5,ls='--',alpha=0.5,color='gray')
     plt.axhline(y=0.2,ls='--',alpha=0.5,color='gray')
     plt.title(f'PID: {pid}, Avg Prob: {round(avg_prob,5)}, Meds: {meds}')
-    plt.savefig(f'/data/scratch/scadavid/projects/data/udall/figs/{pid}.png')
+    plt.savefig(f'/data/scratch/alimirz/2023/SIMON/udall/figs/{pid}.png')
     plt.clf()

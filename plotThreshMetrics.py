@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import KFold
 from sklearn.metrics import classification_report
 from ipdb import set_trace as bp
+import os 
 
 # def get_pos_f1(y_pred_classes, y_true):
 #     pass
@@ -21,8 +22,9 @@ from ipdb import set_trace as bp
 parser = argparse.ArgumentParser()
 parser.add_argument('-lr', type=float, default=4e-4, help='learning rate')
 args = parser.parse_args()
-args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 2; args.dropout = 0.5
-args.no_attention = False; args.label = "benzo"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
+args.num_heads = 4; args.hidden_size = 8; args.fc2_size = 32; args.num_classes = 1; args.dropout = 0.0
+args.no_attention = False; args.label = "antidep"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
+args.pe_learned = False; args.pe_fixed = True; args.PE_amplitude=1; args.fc1_size = 8; args.device = torch.device('cpu')
 
 ## model stuff
 #model_path = "/data/scratch/scadavid/projects/data/models/encoding/wsc/eeg/dep/class_2/checkpoint_simon_model_w14.0/lr_0.0004_w_1.0,14.0_bs_16_f1macro_-1.0_256,64,16_bns_0,0,0_heads4_0.5_att_ctrl_simonmodelweight2_fold0_epoch34.pt"
@@ -37,9 +39,11 @@ args.no_attention = False; args.label = "benzo"; args.tca = False; args.ntca = F
 # bce (tuned) model:
 #model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0002_w_1.0,2.5_ds_eeg_bs_16_epochs_3_dpt_0.0_fold0_256,64,16_heads4bce_tuned_final/lr_0.0002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_final_epochs3_fold0.pt"
 # bce w/relu model:
-model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
+# model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_2_dpt_0.0_fold0_256,64,16_heads4bce_tuned_relu_081123_final/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_attbce_tuned_relu_081123_final_epochs2_fold0.pt"
 # benzo1 model:
 #model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/exp_lr_0.0003_w_1.0,1.0_ds_eeg_bs_16_epochs_20_dpt_0.35_fold0_256,64,16_heads4BENZO_balanced_optimization081023/lr_0.0003_w_1.0,1.0_bs_16_heads4_0.35_attBENZO_balanced_optimization081023_epochs20_fold0.pt"
+# model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/AUTOMATIC_TUNING/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_15_dpt_0.0_fold0_256,64,16_heads4_08-22-23_fixedpe_PHASE2-TUNE3-fc3-fc2_BCE_PEamp_1/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_att08-22-23_fixedpe_PHASE2-TUNE3-fc3-fc2_BCE_epochs15_fold0.pt"
+model_path = "/data/scratch/alimirz/2023/SIMON/TENSORBOARD/AUTOMATIC_TUNING/exp_lr_0.002_w_1.0,2.5_ds_eeg_bs_16_epochs_15_dpt_0.0_fold0_256,64,16_heads4_08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_PEamp_1/lr_0.002_w_1.0,2.5_bs_16_heads4_0.0_att08-22-23_fixedpe_PHASE2-TUNE2-fc3_BCE_epochs15_fold0.pt"
 
 
 model = SimonModel(args)
@@ -50,14 +54,26 @@ state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 model.eval()
 
+
+### shhs2 stuff ###
+dataset = EEG_Encoding_SHHS2_Dataset(args)
+kfold = KFold(n_splits=5, shuffle=True, random_state=20)
+train_ids, test_ids = [(train_id_set, test_id_set) for (train_id_set, test_id_set) in kfold.split(dataset)][0]
+trainset = Subset(dataset, train_ids)
+valset = Subset(dataset, test_ids)
+# dataloader = DataLoader(trainset, batch_size=1, shuffle=False)
+dataloader = DataLoader(valset, batch_size=1, shuffle=False)
+####
+
+
 ### wsc stuff ###
 # dataset = EEG_Encoding_WSC_Dataset(args)
 # dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 ####
 
 ### mros1 stuff ###
-dataset = EEG_Encoding_MrOS1_Dataset(args)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+# dataset = EEG_Encoding_MrOS1_Dataset(args)
+# dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 ## get preds and pids
 y_pred = []
@@ -66,8 +82,8 @@ with torch.no_grad():
     for X, y in dataloader:
         #bp()
         pred = model(X)
-        #pred = torch.sigmoid(pred)
-        pred = torch.softmax(pred, dim=1)[0][1].item()
+        pred = torch.sigmoid(pred)
+        # pred = torch.softmax(pred, dim=1)[0][1].item()
         y_pred.append(pred)
 
         y = y[0].item()
@@ -98,5 +114,6 @@ plt.plot(thresholds, macro_f1s, marker='o', linestyle='-', color='green', label=
 plt.legend()
 plt.xlim(0.0, 1.0)
 plt.ylim(0.0, 1.0)
-plt.title('Benzo Model 1 Evaluated on MrOS1')
-plt.savefig('/data/scratch/scadavid/projects/data/figures/f1_stuff/benzo1_thresh_metrics_mros1.pdf')
+plt.title('Antidep model on Shhs2 Train on TUNE2')
+figure_savepath = "/data/scratch/alimirz/2023/SIMON/FIGURES/" 
+plt.savefig(os.path.join(figure_savepath,"TUNE2_antidep_val_threshold.pdf"))

@@ -788,7 +788,7 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
             return column.apply(lambda x: x-threshold+1 if x >= threshold else 0)
 
     def get_label(self, filename):
-        if(self.label == "antidep" and self.num_classes == 2):
+        if(self.label == "antidep" and self.num_classes <= 2):
             return torch.tensor((int(self.data_dict[filename][0]) or int(self.data_dict[filename][1])), dtype=torch.int64) # could modify parseantidep to be like parsesf36 and avoid 'or'
         elif(self.label == "antidep"):
             pass #FIXME:::
@@ -972,7 +972,7 @@ class EEG_Encoding_WSC_Dataset(Dataset):
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64) # returns raw score, threshold before calculating loss
         elif(self.label == "dep"): # regression w/raw zung score
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
-        elif(self.label == "antidep" and self.num_classes == 2):
+        elif(self.label == "antidep" and self.num_classes <= 2):
             return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
         elif(self.label == "antidep"): # can add thing based on args.num_classes
             #return torch.tensor(self.data_dict[filename][0], dtype=torch.int64) #binary classification
@@ -1207,7 +1207,7 @@ class EEG_Encoding_UDALL_Dataset(Dataset): #FIXME
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.int64) # returns raw score, threshold before calculating loss
         elif(self.label == "dep"): # regression w/raw zung score
             return torch.tensor(self.data_dict_hs[filename], dtype=torch.float32)
-        elif(self.label == "antidep" and self.num_classes == 2):
+        elif(self.label == "antidep" and self.num_classes <= 2):
             return torch.tensor(self.data_dict[filename][0], dtype=torch.int64)
         elif(self.label == "antidep"): # can add thing based on args.num_classes
             #return torch.tensor(self.data_dict[filename][0], dtype=torch.int64) #binary classification
