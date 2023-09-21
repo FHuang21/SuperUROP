@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from ipdb import set_trace as bp
-from BrEEG.task_spec import ResidualBlock1D
+# from BrEEG.task_spec import ResidualBlock1D
 from dataset import EEG_Encoding_SHHS2_Dataset, EEG_SHHS_Dataset
 from torch.utils.data import  DataLoader
 from model_others.Flowformer import FlowformerClassiregressor
+import math 
 import argparse
 def get_rnn(Scale,
             Capacity,
@@ -180,7 +181,7 @@ class BottleNeck1d(nn.Module):
         self.out_channels = out_channels
         self.Scale = Scale
 
-        self.pre_act = nn.BatchNorm1d(in_channels, track_running_stats=False)
+        self.pre_act = nn.BatchNorm1d(in_channels, track_running_stats=True)
 
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0)
@@ -192,7 +193,7 @@ class BottleNeck1d(nn.Module):
             stride=stride,
             padding=(kernel_size - 1) // 2,
         )
-        self.bn = nn.BatchNorm1d(out_channels, track_running_stats=False)
+        self.bn = nn.BatchNorm1d(out_channels, track_running_stats=True)
 
         if in_channels >= int(Scale * 128) or out_channels >= int(Scale * 128):
             p = 0.05
@@ -628,7 +629,32 @@ class ConvModel_Antidep(nn.Module):
         encoder_output = self.pool(self.relu(conv3)).transpose(1,2)
         return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output))))).squeeze(1)
 
-
+class PCAModel_Antidep(nn.Module):
+    def __init__(self, args):
+        super(PCAModel_Antidep, self).__init__()
+        Scale = 0.5
+        # in_channels, out_channels, stride, kernel_size, Scale
+        attn_dropout = 0.0 if args.tuning else 0.2
+        self.attn = nn.MultiheadAttention(32, args.num_heads, dropout=attn_dropout)
+        self.relu = nn.ReLU()
+        self.norm = nn.LayerNorm(32)
+        # self.batch_norm = nn.BatchNorm1d(768)
+        # self.pool = nn.AvgPool1d(kernel_size=3)
+        
+        self.fc1 = nn.Sequential(nn.Linear(150*32, 1024), nn.LayerNorm(1024), nn.Dropout(args.dropout))
+        self.fc2 = nn.Sequential(nn.Linear(1024, 1024), nn.LayerNorm(1024), nn.Dropout(args.dropout))
+        self.fc3 = nn.Linear(1024, args.num_classes)
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        x,_ = self.attn(x,x,x)
+        # x = self.norm(x)
+        # x,_ = self.attn2(x,x,x)
+        # x = x+y
+        # x = self.norm(x)
+        # bp()
+        # conv3= self.block3(conv2)
+        encoder_output = x.view(x.shape[0],-1)
+        return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output)))))
 
 class BottleNeckModel_Antidep(nn.Module):
     def __init__(self, args):
@@ -665,6 +691,59 @@ class BottleNeckModel_Antidep(nn.Module):
         
         encoder_output = conv3
         return self.fc3(self.relu(self.fc2(self.relu(self.fc1(encoder_output)))))
+    
+class CrazyModel_Antidep(nn.Module):
+    def __init__(self, args):
+        super(CrazyModel_Antidep, self).__init__()
+        Scale = 0.5
+        # attn_dropout, dropout, sizes, num_heads1 , num_heads2
+        attn_dropout = 0.0 if args.tuning else 0.10
+        
+        # self.attn1 = nn.MultiheadAttention(150, args.num_heads, dropout=attn_dropout)
+        self.fc1attn1 = nn.Sequential(nn.Linear(768,1024), nn.LayerNorm(1024), nn.Dropout(args.dropout))
+        self.fc2attn1 = nn.Sequential(nn.Linear(1024,64), nn.LayerNorm(64), nn.Dropout(args.dropout))
+        
+        self.attn2 = nn.MultiheadAttention(64, 4, dropout=attn_dropout)
+        self.fc1 = nn.Sequential(nn.Linear(150*64, 1024), nn.LayerNorm(1024), nn.Dropout(args.dropout))
+        self.fc2 = nn.Sequential(nn.Linear(1024, 256), nn.LayerNorm(256), nn.Dropout(args.dropout))
+        self.fc3 = nn.Linear(256, args.num_classes)
+
+        # self.attn3 = nn.MultiheadAttention(150, args.num_heads, dropout=attn_dropout, kdim=32)
+        # self.block1 = BottleNeck1d(768, 256, args.stride, args.kernel_size, Scale) 
+        # self.block2 = BottleNeck1d(256, 128, args.stride, args.kernel_size, Scale) 
+        # self.block3 = BottleNeck1d(256, 128, args.stride, args.kernel_size, Scale) 
+        self.relu = nn.ReLU()
+        # self.norm2 = nn.LayerNorm(150)
+        self.norm1 = nn.LayerNorm(64)
+        # self.batch_norm = nn.BatchNorm1d(768)
+        # self.pool = nn.AvgPool1d(kernel_size=3)
+        
+        
+
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        # x= x.transpose(1,2)
+        # x,_ = self.attn1(x,x,x)
+
+        # x,_ = self.attn2(x,x,x)
+        # x = x+y
+        
+        
+        # x = self.norm2(x)
+        # x= x.transpose(1,2)
+        # x = self.norm1(x)
+        x = self.relu(self.fc1attn1(x))
+        x = self.relu(self.fc2attn1(x))
+        
+        x,_ = self.attn2(x,x,x)
+        # x= x.transpose(1,2)
+        # x = self.norm2(x)
+        x = self.norm1(x)
+        
+        x = x.view(x.shape[0],-1)
+        x = self.relu(self.fc2(self.relu(self.fc1(x))))
+        return self.fc3(x)
+
     
 class Resnet1DModel_Antidep(nn.Module):
     def __init__(self, args):
@@ -742,6 +821,148 @@ class SimonModel_Antidep(nn.Module):
         else:
             return self.fc3(self.relu(self.fc2(self.relu(self.fc1(self.relu(self.encoder(torch.mean(x,axis=1))))))))
 
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+        Arguments:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        """
+        x = x + self.pe.transpose(0,1).repeat(x.shape[0],1,1)
+        return self.dropout(x)
+class MageModel(nn.Module):
+    def __init__(self, args, attn_dropout=0.15):
+        super(MageModel, self).__init__()
+        ## 768 x 150 maybe add a 1x1 conv layer to lower the feature dim
+        self.num_token_heads = args.num_token_heads #4
+        self.feature_dim = args.feature_dim #768 // 48 ##16
+        self.d_size = self.feature_dim * self.num_token_heads
+        
+        
+        self.input_size = 150
+        fc1_size = 64
+        self.pe = PositionalEncoding(self.d_size, max_len=self.input_size, dropout=attn_dropout)
+        self.attn = nn.MultiheadAttention(self.d_size, args.num_heads, attn_dropout, batch_first=True)
+
+        self.norm = nn.LayerNorm(self.d_size)
+        self.kernel_size = 9
+        self.stride = 4
+        
+        
+        self.conv0s = nn.ModuleList([nn.Sequential(nn.Conv1d(768, self.feature_dim , 1, 1), nn.BatchNorm1d(self.feature_dim)) for i in range(self.num_token_heads)])
+        # self.conv00 = nn.Sequential(nn.Conv1d(768, self.feature_dim , 1, 1), nn.BatchNorm1d(self.feature_dim))
+        # self.conv01 = nn.Sequential(nn.Conv1d(768, self.feature_dim , 1, 1), nn.BatchNorm1d(self.feature_dim))
+        # self.conv02 = nn.Sequential(nn.Conv1d(768, self.feature_dim , 1, 1), nn.BatchNorm1d(self.feature_dim))
+        # self.conv03 = nn.Sequential(nn.Conv1d(768, self.feature_dim , 1, 1), nn.BatchNorm1d(self.feature_dim))
+        
+        self.conv1 = nn.Conv1d(self.d_size, self.d_size * 2, self.kernel_size, self.stride, padding=4)
+        self.conv2 = nn.Conv1d(self.d_size * 2, self.d_size * 4, self.kernel_size, self.stride, padding=4)
+        self.conv3 = nn.Conv1d(self.d_size * 4, self.d_size * 8, self.kernel_size, self.stride, padding=4)
+        
+        # self.pool = nn.MaxPool1d(kernel_size=10,stride=10)
+        
+        self.fc1 = nn.Sequential(nn.Linear(self.d_size * 8 , fc1_size), nn.LayerNorm(fc1_size), nn.Dropout(args.dropout), nn.ReLU())
+        # self.fc2 = nn.Sequential(nn.Linear(fc1_size, 256), nn.LayerNorm(256), nn.Dropout(args.dropout), nn.ReLU())
+        self.fc3 = nn.Linear(fc1_size, args.num_classes)
+        self.bn1 = nn.BatchNorm1d(self.d_size * 2)
+        self.bn2 = nn.BatchNorm1d(self.d_size * 4)
+        self.bn3 = nn.BatchNorm1d(self.d_size * 8)
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        # x0 = self.relu(self.conv00(x.transpose(1,2)))
+        # x1 = self.relu(self.conv01(x.transpose(1,2)))
+        # x2 = self.relu(self.conv02(x.transpose(1,2)))
+        # x3 = self.relu(self.conv03(x.transpose(1,2)))
+        xs = [self.relu(self.conv0s[i](x.transpose(1,2))) for i in range(self.num_token_heads)]
+        # x = torch.cat([x0,x1,x2,x3],1)
+        x = torch.cat(xs,1)
+        # x = self.relu(self.conv01(x))
+        # x = self.relu(self.conv02(x))
+        
+        x = self.pe(x.transpose(1,2))
+        x, _ = self.attn(x, x, x)
+        x = self.norm(x)
+        
+        # x = self.pool(x.transpose(1,2))
+        # x shape: B x 1000 x d_size
+        # bp()
+        x = x.transpose(1,2)
+        # x = torch.mean(x,dim=1)
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.relu(self.bn3(self.conv3(x)))
+        x,_ = torch.max(x,dim=2)
+        # x shape: B x 1000
+        ## instead, try to 
+        
+        x = x.view(x.shape[0], -1)
+        x = self.fc1(x)
+        # x = self.fc2(x)
+        return self.fc3(x)
+class StageModel(nn.Module):
+    def __init__(self, args, attn_dropout=0.20):
+        super(StageModel, self).__init__()
+        self.d_size = 24
+        self.num_heads = 1
+        self.embedding = nn.Embedding(4, self.d_size)
+        self.input_size = 2 * 60 * 10
+        fc1_size = 64
+        self.pe = PositionalEncoding(self.d_size, max_len=self.input_size, dropout=attn_dropout)
+        self.attn = nn.MultiheadAttention(self.d_size, self.num_heads, attn_dropout, batch_first=True)
+
+        self.norm = nn.LayerNorm(self.d_size)
+        self.kernel_size = 9
+        self.stride = 4
+        
+        self.conv1 = nn.Conv1d(self.d_size, self.d_size * 2, self.kernel_size, self.stride, padding=4)
+        self.conv2 = nn.Conv1d(self.d_size * 2, self.d_size * 4, self.kernel_size, self.stride, padding=4)
+        self.conv3 = nn.Conv1d(self.d_size * 4, self.d_size * 8, self.kernel_size, self.stride, padding=4)
+        self.conv4 = nn.Conv1d(self.d_size * 8, self.d_size * 16, self.kernel_size, self.stride, padding=4)
+        # self.pool = nn.MaxPool1d(kernel_size=10,stride=10)
+        
+        self.fc1 = nn.Sequential(nn.Linear(self.d_size * 16 , fc1_size), nn.LayerNorm(fc1_size), nn.Dropout(args.dropout), nn.ReLU())
+        # self.fc2 = nn.Sequential(nn.Linear(fc1_size, 256), nn.LayerNorm(256), nn.Dropout(args.dropout), nn.ReLU())
+        self.fc3 = nn.Linear(fc1_size, args.num_classes)
+        self.bn1 = nn.BatchNorm1d(self.d_size * 2)
+        self.bn2 = nn.BatchNorm1d(self.d_size * 4)
+        self.bn3 = nn.BatchNorm1d(self.d_size * 8)
+        self.bn4 = nn.BatchNorm1d(self.d_size * 16)
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        x = self.embedding(x).squeeze(-1)
+        x = self.pe(x)
+        x, _ = self.attn(x, x, x)
+        
+        x = self.norm(x)
+        
+        # x = self.pool(x.transpose(1,2))
+        # x shape: B x 1000 x d_size
+        # bp()
+        x = x.transpose(1,2)
+        # x = torch.mean(x,dim=1)
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.relu(self.bn3(self.conv3(x)))
+        x = self.relu(self.bn4(self.conv4(x)))
+        x,_ = torch.max(x,dim=2)
+        # x shape: B x 1000
+        ## instead, try to 
+        
+        x = x.view(x.shape[0], -1)
+        x = self.fc1(x)
+        # x = self.fc2(x)
+        return self.fc3(x)
 # class AttentionCondensation(nn.Module):
 #     def __init__(self, input_size, hidden_size):
 #         super(AttentionCondensation, self).__init__()
@@ -783,7 +1004,12 @@ if __name__ == '__main__':
     args.no_attention = False; args.label = "nsrrid"; args.tca = False; args.ntca = False; args.ssri = False; args.other = False; args.control = False
     args.device = torch.device('cpu')
     args.hidden_size=64; args.num_heads = 1
-    
+    args.num_heads = 4
+    args.num_token_heads = 4
+    args.feature_dim = 16
+    args.PCA_embedding = False
+    args.tuning = False; args.dropout = 0
+    args.stage_input = False
     dataset = EEG_Encoding_SHHS2_Dataset(args)
     
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
@@ -791,9 +1017,10 @@ if __name__ == '__main__':
     # eeg_encoder = EEG_Encoder().cuda()
     # pd_encoder = BranchVarEncoder().cuda()
     # pd_predictor = BranchVarPredictor().cuda()
-
-
-    model = BottleNeckModel_Antidep(args).cuda()
+    model = MageModel(args).cuda()
+    # model = StageModel(args, attn_dropout=0.0).cuda()
+    # model = CrazyModel_Antidep(args).cuda()
+    # model = BottleNeckModel_Antidep(args).cuda()
     # model = nn.Sequential(eeg_encoder, pd_encoder, pd_predictor)
 
     # model = nn.DataParallel(model)

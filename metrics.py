@@ -179,6 +179,7 @@ class Metrics():
         elif self.args.task == 'binary':
             #bp()
             labels = raw_labels
+            raw_predictions = torch.sigmoid(raw_predictions)
             predictions = (raw_predictions > 0.5).squeeze(1)
             
             self.classifier_metrics_dict["acc"].update(predictions, labels)

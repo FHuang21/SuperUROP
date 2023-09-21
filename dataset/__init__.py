@@ -18,6 +18,14 @@ from ipdb import set_trace as bp
 #import datetime 
 from torch.utils.data import random_split
 
+def process_stages(stages):
+    stages[stages < 0] = 0
+    stages[stages > 5] = 0
+    stages = stages.astype(int)
+    mapping = np.array([0, 2, 2, 3, 3, 1, 0, 0, 0, 0], int)
+    # mapping = np.array([0, 1, 2, 3, 3, 4, 0, 0, 0, 0, 0], np.int64)
+    return mapping[stages]
+
 class DatasetCombiner(Dataset):
     def __init__(self, datasets, phase):
         self.datasets = []
@@ -688,24 +696,37 @@ class EEG_MAYO_Dataset(Dataset):
             return torch.tensor(self.dict_hy[filename])
 
 class EEG_Encoding_SHHS2_Dataset(Dataset):
-    def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/shhs2-dataset-augmented.csv", 
-                 encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/shhs2_new/abdominal_c4_m1"):
+    def __init__(self, args, 
+                 encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/shhs2_new/abdominal_c4_m1", incude_shhs1=True):
         self.no_attention = args.no_attention
-        self.file = file # label file
+        self.args = args
+        self.file = "/data/netmit/wifall/ADetect/data/csv/shhs2-dataset-augmented.csv" # label file
+        self.file_shhs1 = "/data/netmit/wifall/ADetect/data/csv/shhs1-dataset-augmented.csv"
         self.label = args.label
         self.control = args.control
         self.tca = args.tca
         self.ntca = args.ntca
+        if args.PCA_embedding:
+            encoding_path="/data/scratch-oc40/lth/mage-br-eeg-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug_ali_pca_32/shhs2_new/"
+        elif args.stage_input:
+            encoding_path ="/data/netmit/wifall/ADetect/data/shhs2_new/stage/"
         self.encoding_path = encoding_path
+        self.encoding_path_shhs1 = "/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/shhs1_new/abdominal_c4_m1"
         self.num_classes = args.num_classes
         self.all_shhs2_encodings = os.listdir(self.encoding_path)
+        self.all_shhs1_encodings = os.listdir(self.encoding_path_shhs1)
 
         if self.label == "antidep" or self.label == "nsrrid": #FIXME: could add second label for nsrrid w/ cli, or nah
             self.data_dict = self.parse_shhs2_antidep()
+            if incude_shhs1:
+                self.data_dict.update(self.parse_shhs1_antidep())
+            
         elif self.label == "dep":
             self.data_dict = self.parse_shhs2_sf36()
         elif self.label == "benzo":
             self.data_dict = self.parse_shhs2_benzos()
+            if incude_shhs1:
+                self.data_dict.update(self.parse_shhs1_benzos())
         elif self.label == "betablocker":
             self.data_dict = self.parse_shhs2_beta_blockers()
         elif self.label == "ace":
@@ -721,6 +742,20 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
         df = df[['nsrrid', 'tca2', 'ntca2']]
         df = df.dropna()
         output = {f"shhs2-{k}.npz": [v1, v2] for k, v1, v2 in zip(df['nsrrid'], df['tca2'], df['ntca2']) if f"shhs2-{k}.npz" in self.all_shhs2_encodings}
+        return output
+    def parse_shhs1_antidep(self):
+        df = pd.read_csv(self.file_shhs1, encoding='mac_roman')
+        df = df[['nsrrid', 'tca1', 'ntca1']]
+        df = df.dropna()
+        output = {f"shhs1-{k}.npz": [v1, v2] for k, v1, v2 in zip(df['nsrrid'], df['tca1'], df['ntca1']) if f"shhs1-{k}.npz" in self.all_shhs1_encodings}
+        output = {key:output[key] for key in output if sum(output[key]) == 1}
+        return output
+    def parse_shhs1_benzos(self):
+        df = pd.read_csv(self.file_shhs1, encoding='mac_roman')
+        df = df[['nsrrid', 'benzod1']]
+        df = df.dropna()
+        output = {f"shhs1-{k}.npz": v for k, v in zip(df['nsrrid'], df['benzod1']) if f"shhs1-{k}.npz" in self.all_shhs1_encodings}
+        output = {key:output[key] for key in output if output[key] == 1}
         return output
     
     def parse_shhs2_benzos(self):
@@ -862,18 +897,34 @@ class EEG_Encoding_SHHS2_Dataset(Dataset):
     
     def __getitem__(self, idx):
         filename = self.all_valid_files[idx]
-        filepath = os.path.join(self.encoding_path, filename)
+        if 'shhs2' in filename:
+            filepath = os.path.join(self.encoding_path, filename)
+        else:
+            filepath = os.path.join(self.encoding_path_shhs1, filename)
         x = np.load(filepath)
         x = dict(x)
-
-        if not self.no_attention:
-            feature = x['decoder_eeg_latent'].squeeze(0)
-            if feature.shape[0] >= 150:
-                feature = feature[:150, :]
+        
+        if self.args.stage_input:
+            self.input_size = 2 * 60 * 10
+            feature = x['data']
+            stages_fs = x['fs']
+            factor = round(stages_fs * 30)
+            feature = feature[::factor]
+            feature = process_stages(feature)
+            
+            if len(feature) > self.input_size:
+                feature = feature[:self.input_size]
             else:
-                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+                feature = np.concatenate((feature, np.zeros((self.input_size-len(feature)),dtype=int)), axis=0)
         else:
-            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
+            if not self.no_attention:
+                feature = x['decoder_eeg_latent'].squeeze(0)
+                if feature.shape[0] >= 150:
+                    feature = feature[:150, :]
+                else:
+                    feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+            else:
+                feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
 
         label = self.get_label(filename)
 
@@ -892,6 +943,9 @@ class EEG_Encoding_WSC_Dataset(Dataset):
         self.ssri = args.ssri
         self.other = args.other
         self.num_classes = args.num_classes
+        if args.PCA_embedding:
+            encoding_path="/data/scratch-oc40/lth/mage-br-eeg-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug_ali_pca_32/wsc_new/"
+        
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
@@ -1120,6 +1174,7 @@ class EEG_Encoding_UDALL_Dataset(Dataset): #FIXME
     def __init__(self, args, file="/data/netmit/wifall/ADetect/data/csv/wsc-dataset-augmented.csv", 
                  encoding_path="/data/netmit/wifall/ADetect/mage-inference/20230626-mage-br-eeg-cond-8192x32-ce-iter1-alldata-eegps256x8-br1d-1layerbbenc-maskpad-thoraxaug/iter1-temp0.0-mr1.0/udall/abdominal_c4_m1"):
         self.no_attention = args.no_attention
+        self.args = args 
         self.file = file # label file ['NIHND126MXDGP', 'NIHBE740TFYAH', 'NIHPT334YGJLK', 'NIHFW795KLATW', 'NIHDW178UFZHB', 'NIHHD991PGRJC']
         self.label = args.label
         self.control = args.control
@@ -1127,6 +1182,8 @@ class EEG_Encoding_UDALL_Dataset(Dataset): #FIXME
         self.ssri = args.ssri
         self.other = args.other
         self.num_classes = args.num_classes
+        if args.stage_input:
+            encoding_path ="/data/netmit/wifall/ADetect/data/udall/stage/"
         self.encoding_path = encoding_path
         self.all_wsc_encodings = os.listdir(self.encoding_path)
 
@@ -1284,14 +1341,29 @@ class EEG_Encoding_UDALL_Dataset(Dataset): #FIXME
         x = dict(x)
         #bp()
         #print(x['br_latent'].shape) # (565, 768) for ex.
-        if not self.no_attention:
-            feature = x['decoder_eeg_latent'].squeeze(0)
-            if feature.shape[0] >= 150:
-                feature = feature[:150, :]
+        
+        if self.args.stage_input:
+            self.input_size = 2 * 60 * 10
+            feature = x['data']
+            stages_fs = x['fs']
+            factor = round(stages_fs * 30)
+            feature = feature[::factor]
+            feature = process_stages(feature)
+            
+            if len(feature) > self.input_size:
+                feature = feature[:self.input_size]
             else:
-                feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+                feature = np.concatenate((feature, np.zeros((self.input_size-len(feature)),dtype=int)), axis=0)
         else:
-            feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
+            
+            if not self.no_attention:
+                feature = x['decoder_eeg_latent'].squeeze(0)
+                if feature.shape[0] >= 150:
+                    feature = feature[:150, :]
+                else:
+                    feature = np.concatenate((feature, np.zeros((150-feature.shape[0],feature.shape[-1]),dtype=np.float32)), axis=0)
+            else:
+                feature = x['decoder_eeg_latent'].mean(1).squeeze(0) # it gives you 768 dim feature for each night
         # print("feature shape: ", feature.shape)
         # print(type(feature))
         label = self.get_label(filename)

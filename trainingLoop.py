@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import BottleNeckModel_Antidep, ConvModel_Antidep, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, LearnablePositionalEncoding, Resnet1DModel_Antidep, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep
+from model import BottleNeckModel_Antidep, ConvModel_Antidep, EEG_Encoder, BranchVarEncoder, BranchVarPredictor, BBEncoder, LearnablePositionalEncoding, Resnet1DModel_Antidep, SimplePredictor, SimpleAttentionPredictor, SimonModel, SimonModel_Antidep, PCAModel_Antidep, CrazyModel_Antidep, StageModel, MageModel
 from torch.utils.data import DataLoader, Subset #, random_split
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -120,6 +120,10 @@ parser.add_argument('--ssri', action='store_true', default=False, help="just tra
 parser.add_argument('--other', action='store_true', default=False, help="just train on other") # only wsc
 parser.add_argument('--conv_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--bottleneck_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--crazy_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--stage_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--mage_model', action='store_true', default=False, help="use simon model")
+parser.add_argument('--pca_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--resnet_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--simon_model', action='store_true', default=False, help="use simon model")
 parser.add_argument('--simon_model_antidep', action='store_true', default=False, help="use simon model w/dropout")
@@ -127,10 +131,12 @@ parser.add_argument('--hidden_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--fc2_size', type=int, default=32, help="for SimonModel")
 parser.add_argument('--fc1_size', type=int, default=8, help="for SimonModel")
 parser.add_argument('--PE_amplitude', type=float, default=1, help="for fixed positional encoding")
-
+parser.add_argument('--PCA_embedding', action="store_true", default=False, help="lower dimensional version of mage embedding")
 ## for conv model
 parser.add_argument('--kernel_size', type=int, default=5, help="for ConvModel")
 parser.add_argument('--stride', type=int, default=4, help="for ConvModel")
+parser.add_argument('--feature_dim', type=int, default=16, help="for MageModel")
+parser.add_argument('--num_token_heads', type=int, default=4, help="for MageModel")
 
 #parser.add_argument('--model_mage', type=str, default='20230507-mage-br-eeg-cond-rawbrps8x32-8192x32-ce-iter1-alldata-neweeg/iter1-temp0.0-minmr0.5')
 args = parser.parse_args()
@@ -161,7 +167,7 @@ args.batch_norms = css_to_bool_list(args.batch_norms)
 dpt = args.dropout
 dpt_str = f"_{dpt}"
 print("Label: ", label)
-which_model = "simonmodel" if args.simon_model else "convmodel" if args.conv_model else "bottleneckmodel" if args.bottleneck_model else "resnetmodel" if args.resnet_model else "othermodel"
+which_model = "simonmodel" if args.simon_model else "convmodel" if args.conv_model else "bottleneckmodel" if args.bottleneck_model else "resnetmodel" if args.resnet_model else "pcamodel" if args.pca_model else "crazymodel" if args.crazy_model else "stagemodel" if args.stage_model else "magemodel" if args.mage_model else "othermodel"
 #data_path = '/data/scratch/scadavid/projects/data'
 
 #available_devices = range(0, torch.cuda.device_count())
@@ -170,6 +176,12 @@ args.device = device
 
 # initialize DataLoader w/ appropriate dataset (EEG/BB, corresponding dataset)
 is_hao = False
+
+if args.stage_model:
+    args.stage_input = True
+else:
+    args.stage_input = False
+
 if (datatype == 'spec'):
     train_transform, val_transform = set_transform(args)
     dataset = SpecDataset(dataset_name, 0, 'all', df=get_df(dataset_name, args), transform=train_transform, args=args) # hao says cv parameter doesn't matter
@@ -202,9 +214,21 @@ elif (args.conv_model):
 elif (args.bottleneck_model):
     model = BottleNeckModel_Antidep(args).to(device)
     print('Bottleneck Model')
+elif (args.stage_model):
+    model = StageModel(args).to(device)
+    print('Stage Model')
+elif (args.mage_model):
+    model = MageModel(args).to(device)
+    print('Mage Model')
+elif (args.crazy_model):
+    model = CrazyModel_Antidep(args).to(device)
+    print('Crazy Model')
 elif (args.resnet_model):
     model = Resnet1DModel_Antidep(args).to(device)
     print('resnet1d model ')
+elif (args.pca_model):
+    model = PCAModel_Antidep(args).to(device)
+    print('pca model ')
 
 elif (data_source == 'eeg' and datatype == 'ts'):
     model = nn.Sequential(EEG_Encoder(), BranchVarEncoder(args), BranchVarPredictor(args)).to(device)
@@ -233,9 +257,13 @@ else: # DeepClassifier can be used for both EEG and BR spectrograms
 if args.pretrained or args.tuning:
     model_path = os.path.join(folder_path, args.model_path)
     state_dict = torch.load(model_path)
-    # del state_dict['fc3.weight']
-    # del state_dict['fc3.bias']
-    model.load_state_dict(state_dict, strict=False)
+
+    try:
+        model.load_state_dict(state_dict, strict=False)
+    except:
+        del state_dict['fc3.weight']
+        del state_dict['fc3.bias']
+        model.load_state_dict(state_dict, strict=False)
     # fc_end = nn.Linear(2,1)
     
     # for param in model.parameters():
@@ -273,7 +301,7 @@ if True:
     n_model = deepcopy(model).to(device) # need to reset model w/ untrained params each fold so no overfitting
     #n_model = model
 
-    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}_Model_{which_model}_kernelsize_{args.kernel_size}"
+    exp_name = f"exp_lr_{lr}_w_{args.w}_ds_{data_source}_bs_{batch_size}_epochs_{num_epochs}_dpt_{args.dropout}_fold{fold}{pretrained}{layer_dims_str}_heads{args.num_heads}{ctrl}_{add_name}_PEamp_{args.PE_amplitude}_Model_{which_model}_kernelsize_{args.kernel_size}_featuredim_{args.feature_dim}_numtokenheads_{args.num_token_heads}"
     #folder_path = "/data/scratch/scadavid/projects/code/tensorboard_log/test" #FIXME::: change to what you want
     # folder_path = os.path.join("/data/scratch/scadavid/projects/code/tensorboard_log", datatype, dataset_name, label, num_class_name)
     
@@ -310,6 +338,7 @@ if True:
     metrics = Metrics(args)
 
     max_f1 = -1.0
+    
     for epoch in range(num_epochs):
         running_loss = 0.0
         n_model.train()
@@ -389,15 +418,16 @@ if True:
 
             ## save final model:
             # if (epoch==(num_epochs-1)):
-            if epoch_loss == np.min(val_losses):
+            if True: #epoch_loss == np.min(val_losses):
                 print('saving at epoch: ', epoch)
-                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_epochs{num_epochs}_fold{fold}_best.pt"
+                model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_epochs{num_epochs}_fold{fold}_epoch_{epoch}.pt"
                 model_save_path = os.path.join(model_path, model_name)
                 if not os.path.exists(model_path):
                     # Create the folder if it does not exist
                     os.makedirs(model_path)
                     #print(f"Folder '{model_save_path}' created successfully.")
                 torch.save(n_model.state_dict(), model_save_path)
+            
             # ## TEMP
             # if((epoch+1) % 5 == 0):
             #     model_name = f"lr_{lr}_w_{args.w}_bs_{batch_size}_f1macro_{round(max_f1, 2)}{layer_dims_str}_bns{batch_norms_str}_heads{args.num_heads}{dpt_str}{pretrained}{att}{ctrl}{add_name}_fold{fold}_epoch{epoch}.pt"
@@ -420,7 +450,6 @@ if True:
             #     torch.save(n_model.state_dict(), model_save_path)
 
         torch.cuda.empty_cache()
-
 
 
     # model_name = "" # otherwise it overwrites the best model from the previous fold
