@@ -1,0 +1,11 @@
+Weekly Progress Report
+
+9/18 - 9/22
+- Performed literature review on self-supervised models as well as sleep-monitoring devices
+- Watching/reading through "The Missing Semester (IAP)" Course - important tools*
+- Initialized git repo; cloned pre-existing intern files
+
+To-Dos:
+- Setup CSAIL account to gain access to private data and TensorBoard
+- Create own __init__.py file; write models and training loop scripts
+- For dataloader (init file), focus on class EEG_SHHS2_Dataset(Dataset)
