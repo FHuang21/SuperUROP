@@ -8,4 +8,5 @@ Weekly Progress Report
 To-Dos:
 - Setup CSAIL account to gain access to private data and TensorBoard
 - Create own __init__.py file; write models and training loop scripts
-- For dataloader (init file), focus on class EEG_SHHS2_Dataset(Dataset)
+- For dataloader (init file), focus on class EEG_Encoding_SHHS2_Dataset(Dataset):
+
