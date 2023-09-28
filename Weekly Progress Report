@@ -11,9 +11,13 @@ To-Dos:
 - For dataloader (init file), focus on class EEG_Encoding_SHHS2_Dataset(Dataset):
 
 9/25 - 9/29
+Dataset: Build out __init__, len(), get() functions
+Model: Build out __init__, forward() functions
+Main (Running): Understand Tensorboard/Torch Metrics, Optimizer, Training Loop, Eval Loop, and Loss Function
+
+To-Dos:
 - Gain access to GPU and Models on Server
 - Gain Redcap access from BWH (Hospital)
 - Setup Analytics Repo
-- Build out model scripts
 
 
