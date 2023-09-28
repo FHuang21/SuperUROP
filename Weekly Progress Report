@@ -10,3 +10,10 @@ To-Dos:
 - Create own __init__.py file; write models and training loop scripts
 - For dataloader (init file), focus on class EEG_Encoding_SHHS2_Dataset(Dataset):
 
+9/25 - 9/29
+- Gain access to GPU and Models on Server
+- Gain Redcap access from BWH (Hospital)
+- Setup Analytics Repo
+- Build out model scripts
+
+
